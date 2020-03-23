@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import maximize
 from copy import deepcopy
 from contextlib import contextmanager
 import pdb
@@ -185,7 +185,7 @@ class ParticleI2cGraph():
         # update alpha
         def log_lik(a):
             return a * np.sum(all_costs) + self.T * np.log(1./(np.sum(np.exp(a * all_costs))))
-        alpha = minimize(log_lik, alpha, method='nelder-mead', 
+        alpha = maximize(log_lik, alpha, method='nelder-mead', 
             options={'xatol': 1e-8, 'disp': True})
         return alpha
 
