@@ -1,12 +1,14 @@
-
 from contextlib import contextmanager
 import datetime
 from distutils.spawn import find_executable
 import numpy as np
 import os
 import time
+from abc import ABC, abstractmethod
 
 import matplotlib.pyplot as plt
+
+from scipy.stats import multivariate_normal
 
 
 def finite_horizon_lqr(H, A, a, B, Q, R, x0, xg, ug, dim_x, dim_u):
@@ -156,3 +158,130 @@ def configure_plots():
     if find_executable("latex"):
         matplotlib.rcParams['text.usetex'] = True
         matplotlib.rcParams['text.latex.unicode'] = True
+
+
+class Distribution(ABC):
+
+    def __call__(self, x):
+        return self.likelihood(x)
+
+    @abstractmethod
+    def likelihood(self, x):
+        pass
+
+    @abstractmethod
+    def sample(self, n):
+        pass
+
+
+class GMM(Distribution):
+    """A Gaussian Mixture Model with constant sigma for each mixture component,
+    to model a kernel density estimate
+    """
+
+    def __init__(mu, pi, sig):
+        """[summary]
+        
+        Arguments:
+            mu {np.ndarray} -- means of the mixture components
+            pi {np.ndarray} -- weights of the mixture components
+            sig {float} -- covariance of each mixture comp: np.eye() * sig
+        """
+        self.dim = len(mu)
+        self.sig = np.eye(self.dim) * sig
+        self.mu = mu
+        self.num_components = len(pi)
+
+        self.gaussians = []
+        
+        for i in range(mu.shape[1]):
+            pdf = multivariate_normal(mu[:, i], sig)
+            self.gaussians.append(pdf)
+        
+        self.pi = pi
+
+    def likelihood(self, x):
+        """COmputes the likelihood under the gmm using a weighted sum
+        
+        Arguments:
+            x {[type]} -- [description]
+        """
+        prob = 0.
+        for i in range(self.dim):
+            prob += self.gaussians[i].pdf(x) * self.pi[i]
+        return prob
+
+    def sample(self, n):
+        """Implements sampling from the GMM
+        
+        Arguments:
+            n {int} -- number of samples to draw
+        """
+        samples = []
+        comp = np.random.choice(
+            np.arange(self.num_components), 
+            size=n, 
+            replace=True, 
+            p=self.pi)
+        for c in comp:
+            samples.append(self.gaussians[c].rvs())
+        return np.array(samples)
+
+    def mean(self):
+        return np.sum(self.mu * self.pi)
+
+    def marginalize(self, idx):
+        """Marginalizes a continuous range of the GMM domain
+        and returns a GMM over that range
+        
+        Arguments:
+            idx {np.index_array} -- indices of the remaining observations
+        
+        Returns:
+            GMM -- A new mixture model
+        """
+        new_mu = mu[idx]
+        return GMM(new_mu, self.pi, self.sig)
+
+    def condition(self, x, idx):
+        """Builds a new GMM which is conditioned on an observation
+
+        Arguments:
+            x {np.array} -- observation to condition on
+            idx {np.index_array} -- index array of the observation
+        """
+        obs_mask = np.zeros(self.dim, dtype=np.bool_)
+        obs_mask[idx] = True
+        var_mask = ~obs_mask
+
+        gmm_marginal_obs = self.marginalize(idx)
+        gmm_marginal_var = self.marginalize(var_mask)
+        obs_prob = gmm_marginal_obs([obs_mask])
+        mu_obs_prob = np.sum(obs_prob)
+
+        new_pi = self.pi * obs_prob/mu_obs_prob
+        gmm_marginal_var.pi = new_pi
+
+        return gmm_marginal_var
+
+    def conditional_mean(self, x, idx):
+        return self.condition(x, idx).mean()
+
+
+class GaussianPrior(Distribution):
+
+    def __init__(self, mu, sigma):
+        self.mu = mu
+        self.sigma = sigma
+        self.dim = len(mu)
+
+        self.pdf = multivariate_normal(mu, sigma)
+
+    def likelihood(self, x):
+        return self.pdf.pdf(x)
+
+    def sample(self, n):
+        samples = []
+        for _ in n:
+            samples.append(self.pdf.rvs())
+        return np.array(samples)

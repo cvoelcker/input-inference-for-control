@@ -38,6 +38,12 @@ class BaseSim(object):
             np.zeros((self.dim_u, 1)))[0].squeeze()
         return xt, yt, zt
 
+    def forward_likelihood(self, x1, x0):
+        '''
+        Necessary for the particle filter smoothing algorithm
+        '''
+        raise NotImplementedError
+
     def forward(self, u):
         raise NotImplementedError
 
