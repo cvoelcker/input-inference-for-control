@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import numpy as np
+from scipy.optimize import minimize
 from copy import deepcopy
 from contextlib import contextmanager
 import pdb
@@ -150,13 +151,14 @@ class ParticleI2cGraph():
 
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
 
-        self.alpha = 1.
+        self.init_alpha = 1.
 
     def run(self):
-        self._expectation()
-        self._maximization()
+        alpha = self.init_alpha
+        self._expectation(alpha)
+        alpha = self._maximization()
 
-    def _expectation(self):
+    def _expectation(self, alpha):
         # sample initial x from the systems inital distribution
         particles = self.x0_dist.sample(self.num_p)
 
@@ -173,9 +175,19 @@ class ParticleI2cGraph():
         for c in self.cells:
             particles = c.backward(particles)
 
-    def _maximization(self)
-        # ... update alpha
-        FUCK
+    def _maximization(self, alpha):
+        # get all cost parameters
+        all_costs = []
+        for c in self.cells:
+            all_costs.append(self.cost(c.new_particles))
+        all_costs = np.array(all_costs).flatten()
+
+        # update alpha
+        def log_lik(a):
+            return a * np.sum(all_costs) + self.T * np.log(1./(np.sum(np.exp(a * all_costs))))
+        alpha = minimize(log_lik, alpha, method='nelder-mead', 
+            options={'xatol': 1e-8, 'disp': True})
+        return alpha
 
     def get_policy(self, x, i):
         return self.cells[i].policy(x)
