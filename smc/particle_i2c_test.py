@@ -44,7 +44,7 @@ if __name__ == "__main__":
     
     
     particle_graph = ParticleI2cGraph(
-        sys, cost, 100, 10000, 1000, np.array([5., 5.]), 0.00001, np.array([0.]), 100000., 100., 10.)
+        sys, cost, 100, 100, 100, np.array([5., 5.]), 0.00001, np.array([0.]), 100000., 100., 10.)
     for i in range(100):
         particle_graph._expectation(0.0001)
         print('Updated graph {}'.format(i))
@@ -56,7 +56,9 @@ if __name__ == "__main__":
         x = sys.x0.copy()
         y = sys.x0.copy()
         for i in range(100):
-            u = particle_graph.get_policy(x.reshape(-1), i)
+            u = particle_graph.get_policy(x.reshape(-1), i).reshape(-1, 1)
+            print(u.shape)
+            print(x.shape)
             u0 = np.array([[0.]])
             costs.append(cost(x.reshape(-1), u))
             costs_y.append(cost(y.reshape(-1), u0))
