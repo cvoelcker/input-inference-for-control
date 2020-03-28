@@ -20,7 +20,7 @@ def build_q():
     R = np.eye(1) * 1.
     x = np.array([[0., 0.]])
     u = np.array([[0.]])
-    cost = StaticQRCost(Q, R, np.array([[0., 0.]]), np.array([[0.]]))
+    cost = StaticQRCost(Q, R, x, u)
     prob = Cost2Prob(cost)
     return cost, prob
 

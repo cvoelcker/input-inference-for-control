@@ -229,7 +229,8 @@ class GMM(Distribution):
         return np.array(samples)
 
     def mean(self):
-        return np.sum(self.mu * self.pi)
+        pi = self.pi.reshape(self.num_components, 1)
+        return np.sum(self.mu * pi, 0)
 
     def marginalize(self, idx):
         """Marginalizes a continuous range of the GMM domain
@@ -259,9 +260,9 @@ class GMM(Distribution):
         gmm_var = self.marginalize(var_mask)
         
         reweight = np.array([g.pdf(x) for g in gmm_obs.gaussians])
+        reweight = gmm_var.pi * reweight
         reweight /= np.sum(reweight)
-
-        gmm_var.pi = gmm_var.pi * reweight
+        gmm_var.pi = reweight
 
         return gmm_var
 
@@ -272,7 +273,6 @@ class GMM(Distribution):
 class GaussianPrior(Distribution):
 
     def __init__(self, mu, sigma):
-        print(sigma)
         self.mu = mu
         self.sigma = sigma
         self.dim = len(mu)
