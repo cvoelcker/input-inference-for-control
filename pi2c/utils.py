@@ -179,7 +179,7 @@ class GMM(Distribution):
     to model a kernel density estimate
     """
 
-    def __init__(mu, pi, sig):
+    def __init__(self, mu, pi, sig):
         """[summary]
         
         Arguments:
@@ -187,15 +187,16 @@ class GMM(Distribution):
             pi {np.ndarray} -- weights of the mixture components
             sig {float} -- covariance of each mixture comp: np.eye() * sig
         """
-        self.dim = len(mu)
+        self.dim = mu.shape[1]
+        self.sig_scale = sig
         self.sig = np.eye(self.dim) * sig
         self.mu = mu
         self.num_components = len(pi)
 
         self.gaussians = []
         
-        for i in range(mu.shape[1]):
-            pdf = multivariate_normal(mu[:, i], sig)
+        for i in range(mu.shape[0]):
+            pdf = multivariate_normal(mu[i], sig)
             self.gaussians.append(pdf)
         
         self.pi = pi
@@ -207,8 +208,8 @@ class GMM(Distribution):
             x {[type]} -- [description]
         """
         prob = 0.
-        for i in range(self.dim):
-            prob += self.gaussians[i].pdf(x) * self.pi[i]
+        for g, p in zip(self.gaussians, self.pi):
+            prob += p * g.pdf(x)
         return prob
 
     def sample(self, n):
@@ -240,8 +241,8 @@ class GMM(Distribution):
         Returns:
             GMM -- A new mixture model
         """
-        new_mu = mu[idx]
-        return GMM(new_mu, self.pi, self.sig)
+        new_mu = self.mu[:, idx]
+        return GMM(new_mu, self.pi, self.sig_scale)
 
     def condition(self, x, idx):
         """Builds a new GMM which is conditioned on an observation
@@ -252,17 +253,17 @@ class GMM(Distribution):
         """
         obs_mask = np.zeros(self.dim, dtype=np.bool_)
         obs_mask[idx] = True
-        var_mask = ~obs_mask
+        var_mask = np.where(~obs_mask)[0]
+        
+        gmm_obs = self.marginalize(idx)
+        gmm_var = self.marginalize(var_mask)
+        
+        reweight = np.array([g.pdf(x) for g in gmm_obs.gaussians])
+        reweight /= np.sum(reweight)
 
-        gmm_marginal_obs = self.marginalize(idx)
-        gmm_marginal_var = self.marginalize(var_mask)
-        obs_prob = gmm_marginal_obs([obs_mask])
-        mu_obs_prob = np.sum(obs_prob)
+        gmm_var.pi = gmm_var.pi * reweight
 
-        new_pi = self.pi * obs_prob/mu_obs_prob
-        gmm_marginal_var.pi = new_pi
-
-        return gmm_marginal_var
+        return gmm_var
 
     def conditional_mean(self, x, idx):
         return self.condition(x, idx).mean()
@@ -271,6 +272,7 @@ class GMM(Distribution):
 class GaussianPrior(Distribution):
 
     def __init__(self, mu, sigma):
+        print(sigma)
         self.mu = mu
         self.sigma = sigma
         self.dim = len(mu)
@@ -282,6 +284,6 @@ class GaussianPrior(Distribution):
 
     def sample(self, n):
         samples = []
-        for _ in n:
+        for _ in range(n):
             samples.append(self.pdf.rvs())
         return np.array(samples)

@@ -3,6 +3,7 @@ Environments to control
 """
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy as sc
 import os
 
 import pi2c.env_def as env_def
@@ -38,11 +39,21 @@ class BaseSim(object):
             np.zeros((self.dim_u, 1)))[0].squeeze()
         return xt, yt, zt
 
-    def forward_likelihood(self, x1, x0):
+    def likelihood(self, x1, x0):
         '''
         Necessary for the particle filter smoothing algorithm
         '''
         raise NotImplementedError
+
+    def sample(self, x, u):
+        """
+        SUPER HACKY, FIX with Joe!
+        """
+        x_cur = self.x.copy()
+        self.x = x
+        sample = self.forward(u)
+        self.x = x_cur
+        return sample
 
     def forward(self, u):
         raise NotImplementedError
@@ -79,7 +90,7 @@ class LinearSim(env_def.LinearDef, BaseSim):
 
     def __init__(self, duration):
         self.duration = duration
-        self.a = self.a.reshape((-1,)) # give me strength...
+        self.a = self.a.reshape((-1,1)) # give me strength... # sorry Joe
 
     def init_env(self):
         self.x = np.copy(self.x0).squeeze()
@@ -89,6 +100,28 @@ class LinearSim(env_def.LinearDef, BaseSim):
         x = self.A.dot(self.x) + self.B.dot(u) + self.a
         self.x = x.reshape(self.x.shape)
         return self.x
+
+class LinearDisturbed(env_def.LinearDef, BaseSim):
+
+    def __init__(self, duration):
+        self.duration = duration
+        self.a = self.a.reshape((-1, 1)) # give me strength...
+        self.sig_x_noise = 0.0000001
+        self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
+
+    def init_env(self):
+        self.x = np.copy(self.x0).squeeze()
+        return self.x
+
+    def forward(self, u):
+        x = self.A.dot(self.x) + self.B.dot(u) + self.a + np.random.randn(*self.x.shape) * self.sig_x_noise
+        self.x = x.reshape(self.x.shape)
+        return self.x
+
+    def likelihood(self, x0, u, x1):
+        _x = self.A.dot(x0) + self.B.dot(u) + self.a
+        _x -= x1
+        return self.noise_pdf.pdf(_x.T)
 
 class PendulumKnown(env_def.PendulumKnown, BaseSim):
 
@@ -197,6 +230,7 @@ class TwoLinkElasticJointRobotKnown(env_def.TwoLinkElasticJointRobotKnown, BaseS
 def make_env(exp):
     _lookup = {
         "LinearKnown": LinearSim,
+        "LinearDisturbed": LinearDisturbed,
         "PendulumKnown": PendulumKnown,
         "PendulumLinearObservationKnown": PendulumLinearObservationKnown,
         "CartpoleKnown": CartpoleKnown,

@@ -1,5 +1,5 @@
 import numpy as np
-
+from abc import ABC, abstractmethod
 
 class EnvCostFunction(ABC):
     normalized = False
@@ -14,6 +14,9 @@ class EnvCostFunction(ABC):
             return self._cost(x, u, self.xg, self.ug)
         else:
             return self._cost(x, u, xg, ug)
+
+    def __call__(self, x, u, xg=None, ug=None):
+        return self.cost(x, u, xg, ug)
 
 
 class QRCost(EnvCostFunction):
@@ -51,8 +54,8 @@ class StaticQRCost(QRCost):
         _x = x - xg
         _u = u - ug
 
-        Q_cost = (_x.T).dot(self.Q).dot(_x)
-        R_cost = (_u.T).dot(self.R).dot(_u)
+        Q_cost = np.diag((_x).dot(self.Q).dot(_x.T))
+        R_cost = np.diag((_u).dot(self.R).dot(_u.T))
 
         return -(Q_cost + R_cost)
 
@@ -65,3 +68,6 @@ class Cost2Prob():
 
     def likelihood(self, x, u, alpha=1., xg=None, ug=None):
         return np.exp(alpha * self.c.cost(x, u, xg, ug))
+    
+    def __call__(self, x, u, alpha=1., xg=None, ug=None):
+        return self.likelihood(x, u, alpha, xg, ug)
