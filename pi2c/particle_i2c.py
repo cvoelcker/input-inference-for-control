@@ -117,7 +117,7 @@ class ParticleI2cCell():
         joint_prob = GMM(self.back_particles, 
             np.ones(len(self.back_particles))/len(self.back_particles), 
             self.smooth_posterior)
-        return joint_prob.conditional_mean(x, np.arange(self.sys.dim_x))
+        return joint_prob.conditional_sample(x, np.arange(self.sys.dim_x))
 
     def update_u_prior(self):
         """Updates the prior for u by smoothing the posterior particle distribution 

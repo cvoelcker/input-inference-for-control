@@ -269,6 +269,9 @@ class GMM(Distribution):
     def conditional_mean(self, x, idx):
         return self.condition(x, idx).mean()
 
+    def conditional_sample(self, x, idx):
+        return self.condition(x, idx).sample()
+
 
 class GaussianPrior(Distribution):
 
