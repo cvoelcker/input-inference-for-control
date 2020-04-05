@@ -47,7 +47,7 @@ if __name__ == "__main__":
     
     
     particle_graph = ParticleI2cGraph(
-        sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 0.00001, np.array([0., 0., 0.]), 100000., 100., 100.)
+        sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 0.00001, np.array([0., 0., 0.]), 100000.)
     for i in range(100):
         alpha = 0.0001
         alpha = particle_graph.run(alpha, False)

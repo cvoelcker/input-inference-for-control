@@ -20,7 +20,7 @@ from pi2c.cost_function import Cost2Prob
 
 class ParticleI2cCell():
 
-    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0=100., gmm_components=10):
+    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0=100., gmm_components=4):
         """Initializes a particel swarm cell at a specific time index
         
         Arguments:
@@ -50,9 +50,9 @@ class ParticleI2cCell():
         # build broad EM prior
         pi = np.array([1.] * gmm_components)/gmm_components
         # add small tither to GMM components to aid convergence of first round
-        mu = np.tile(mu_u0, (len(mu_u0), gmm_components)) + \
-             np.random.randn(len(mu_u0), gmm_components) * sig_u0/10.
-        self.u_prior = GMM(mu_u0, pi, sig_u0)
+        mu = np.tile(mu_u0.reshape(1, -1), (gmm_components, 1)) + \
+             np.random.randn(gmm_components, len(mu_u0)) * sig_u0/10.
+        self.u_prior = GMM(mu, pi, sig_u0)
 
         self.alpha = 0.0001
 
@@ -69,8 +69,12 @@ class ParticleI2cCell():
         return self.back_particles is not None
 
     def forward(self, particles, alpha=1., use_time_alpha=False):
-        new_u = self.u_prior.sample(self.num_p).reshape(-1, self.dim_u)
+        new_u = []
+        for i in range(self.num_p):
+            new_u.append(
+                self.u_prior.conditional_sample(particles[i], np.arange(self.dim_x), 1))
         # print(new_u)
+        new_u = np.array(new_u)
         self.particles = np.concatenate([particles, new_u], 1)
         # print(particles)
         if use_time_alpha:
@@ -163,7 +167,7 @@ class ParticleI2cCell():
 
 class ParticleI2cGraph():
     
-    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, smooth_prior, smooth_posterior):
+    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, gmm_components=4):
         """[summary]
         
         Arguments:
@@ -181,7 +185,7 @@ class ParticleI2cGraph():
 
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, smooth_prior, smooth_posterior))
+            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, gmm_components))
 
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
 

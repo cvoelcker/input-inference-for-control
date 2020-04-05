@@ -268,10 +268,14 @@ class GMM(Distribution):
         gmm_var.pi = reweight
 
         for i in range(self.num_components):
-            sig_corr = gmm_var.sig[i][var_mask, obs_mask].dot(
-                np.inv(gmm_var.sig[i][obs_mask, obs_mask]))
+            # correction for 1 dim u (linalg doesn't invert that)
+            if len(var_mask) == 1:
+                sig_corr = self.sig[i][idx, idx] * 1/self.sig[i][idx, idx]
+            else:
+                sig_corr = self.sig[i][var_mask, idx].dot(self.sig[i][var_mask, idx]).dot(
+                    np.linalg.inv(self.sig[i][idx, idx]))
             gmm_var.mu[i] += sig_corr.dot(x - gmm_obs.mu[i])
-            gmm_var.sig[i] -= sig_corr.dot(gmm_var.sig[i][obs_mask, var_mask])
+            gmm_var.sig[i] -= sig_corr.dot(self.sig[i][idx, var_mask])
 
         return gmm_var
 
