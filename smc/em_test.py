@@ -40,39 +40,21 @@ samples = np.concatenate([samples1, samples2, samples3], 0)
 
 gmm = GMM(mu_init, pi_init, sig_init)
 
-for i in range(100):
-    # if i%10 == 0:
-    #     plot_2d(gmm)
-    #     plot_scatter(samples1)
-    #     plot_scatter(samples2)
-    #     plot_scatter(samples3)
-    #     # plot_scatter(gmm.sample(10000))
+gmm.update_parameters(samples)
 
-    #     plt.show()
-    #     print(gmm.sig)
-    #     print(cov1)
-    #     print(cov2)
-    #     print(cov3)
-    #     print(gmm.pi)
+plot_2d(gmm)
+plot_scatter(samples1)
+plot_scatter(samples2)
+plot_scatter(samples3)
+# plot_scatter(gmm.sample(10000))
 
-    membership = gmm.e_step(samples)
-    converged = gmm.m_step(samples, membership)
-    if converged:
-        plot_2d(gmm)
-        plot_scatter(samples1)
-        plot_scatter(samples2)
-        plot_scatter(samples3)
-        # plot_scatter(gmm.sample(10000))
+plt.show()
+plot_2d(gmm)
+plt.show()
+print(gmm.sig)
+print(cov1)
+print(cov2)
+print(cov3)
+print(gmm.pi)
 
-        plt.show()
-        plot_2d(gmm)
-        plt.show()
-        print(gmm.sig)
-        print(cov1)
-        print(cov2)
-        print(cov3)
-        print(gmm.pi)
-
-        print('converged')
-
-        break
+print('converged')

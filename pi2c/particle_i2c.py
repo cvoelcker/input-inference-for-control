@@ -20,7 +20,7 @@ from pi2c.cost_function import Cost2Prob
 
 class ParticleI2cCell():
 
-    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0, smooth_prior, smooth_posterior):
+    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0=100., gmm_components=10):
         """Initializes a particel swarm cell at a specific time index
         
         Arguments:
@@ -47,9 +47,12 @@ class ParticleI2cCell():
         self.back_particles = None
         self.back_weights = None
 
-        self.u_prior = GaussianPrior(mu_u0, sig_u0)
-        self.smooth_prior = smooth_prior
-        self.smooth_posterior = smooth_posterior
+        # build broad EM prior
+        pi = np.array([1.] * gmm_components)/gmm_components
+        # add small tither to GMM components to aid convergence of first round
+        mu = np.tile(mu_u0, (len(mu_u0), gmm_components)) + \
+             np.random.randn(len(mu_u0), gmm_components) * sig_u0/10.
+        self.u_prior = GMM(mu_u0, pi, sig_u0)
 
         self.alpha = 0.0001
 
@@ -242,35 +245,42 @@ class ParticleI2cGraph():
         print(np.mean(all_costs))
 
     def _maximization(self, alpha, use_time_alpha=False):
-        # get all cost parameters
-        if use_time_alpha:
-            for c in self.cells:
-                c.update_alpha()
-            return 1.
-        else:
-            all_costs = []
-            for c in self.cells:
-                all_costs.append(np.sum(self.cost(c.particles_x(), c.particles_u())))
-            all_costs = np.array(all_costs)
+        ## JOINT UPDATE
+        for c in self.cells:
+            c.u_prior.update_parameters(c.back_particles)
+        ## ALPHA UPDATE
 
-            def alpha_eq(a):
-                return self.T * (np.mean(a * all_costs) - np.log(np.mean(np.exp(a * self.sample_costs))))
 
-            def alpha_der(a):
-                return self.T * (np.mean(all_costs) - (np.mean(self.sample_costs*np.exp(a*self.sample_costs)))/(np.mean(np.exp(a*self.sample_costs))))
+        # # get all cost parameters
+        # if use_time_alpha:
+        #     for c in self.cells:
+        #         c.update_alpha()
+        #     return 1.
+        # else:
+        #     all_costs = []
+        #     for c in self.cells:
+        #         all_costs.append(np.sum(self.cost(c.particles_x(), c.particles_u())))
+        #     all_costs = np.array(all_costs)
 
-            new_alpha = alpha + 1e-12 * alpha_der(alpha)
+        #     def alpha_eq(a):
+        #         return self.T * (np.mean(a * all_costs) - np.log(np.mean(np.exp(a * self.sample_costs))))
 
-            print(alpha_der(alpha))
-            print(alpha_eq(alpha))
-            print(alpha_eq(0))
-            print(alpha_eq(-0.001))
+        #     def alpha_der(a):
+        #         return self.T * (np.mean(all_costs) - (np.mean(self.sample_costs*np.exp(a*self.sample_costs)))/(np.mean(np.exp(a*self.sample_costs))))
 
-            print(new_alpha)
+        #     new_alpha = alpha + 1e-12 * alpha_der(alpha)
 
-            assert (alpha_eq(new_alpha) >= alpha_eq(alpha)) and new_alpha > 0, '{} {} {}'.format(alpha_der(alpha), alpha_eq(new_alpha), alpha_eq(alpha))
+        #     print(alpha_der(alpha))
+        #     print(alpha_eq(alpha))
+        #     print(alpha_eq(0))
+        #     print(alpha_eq(-0.001))
 
-            return new_alpha
+        #     print(new_alpha)
+
+        #     assert (alpha_eq(new_alpha) >= alpha_eq(alpha)) and new_alpha > 0, '{} {} {}'.format(alpha_der(alpha), alpha_eq(new_alpha), alpha_eq(alpha))
+
+        #     return new_alpha
+        return alpha
 
     def check_alpha_converged(self):
         return False

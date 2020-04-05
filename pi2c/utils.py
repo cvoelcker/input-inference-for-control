@@ -249,6 +249,7 @@ class GMM(Distribution):
 
     def condition(self, x, idx):
         """Builds a new GMM which is conditioned on an observation
+        Based on the derivation in https://stats.stackexchange.com/questions/348941/general-conditional-distributions-for-multivariate-gaussian-mixtures
 
         Arguments:
             x {np.array} -- observation to condition on
@@ -265,6 +266,12 @@ class GMM(Distribution):
         reweight = gmm_var.pi * reweight
         reweight /= np.sum(reweight)
         gmm_var.pi = reweight
+
+        for i in range(self.num_components):
+            sig_corr = gmm_var.sig[i][var_mask, obs_mask].dot(
+                np.inv(gmm_var.sig[i][obs_mask, obs_mask]))
+            gmm_var.mu[i] += sig_corr.dot(x - gmm_obs.mu[i])
+            gmm_var.sig[i] -= sig_corr.dot(gmm_var.sig[i][obs_mask, var_mask])
 
         return gmm_var
 
@@ -284,7 +291,7 @@ class GMM(Distribution):
 
         while not converged:
             membership = self.e_step(samples)
-            converged = self.q_step(samples, membership)
+            converged = self.m_step(samples, membership)
 
     def e_step(self, samples):
         prob = []
