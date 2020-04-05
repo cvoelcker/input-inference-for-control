@@ -269,8 +269,13 @@ class GMM(Distribution):
     def conditional_mean(self, x, idx):
         return self.condition(x, idx).mean()
 
-    def conditional_sample(self, x, idx):
-        return self.condition(x, idx).sample()
+    def conditional_sample(self, x, idx, n):
+        return self.condition(x, idx).sample(n)
+
+    def conditional_max(self, x, idx):
+        cond = self.condition(x, idx)
+        nn = np.argmax(cond.pi)
+        return cond.mu[nn]
 
 
 class GaussianPrior(Distribution):

@@ -1,0 +1,13 @@
+Metadata-Version: 1.1
+Name: pi2c
+Version: 0.0.0
+Summary: Input Inference for Stochastic Optimal Control
+Home-page: UNKNOWN
+Author: UNKNOWN
+Author-email: UNKNOWN
+License: UNKNOWN
+Description: UNKNOWN
+Keywords: optimal control,inference,reinforcement learning
+Platform: ALL
+Classifier: Intended Audience :: Science/Research
+Classifier: Programming Language :: Python

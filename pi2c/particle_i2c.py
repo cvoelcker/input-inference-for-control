@@ -1,7 +1,8 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, brentq
+from scipy.special import logsumexp
 from copy import deepcopy
 from contextlib import contextmanager
 import pdb
@@ -50,6 +51,8 @@ class ParticleI2cCell():
         self.smooth_prior = smooth_prior
         self.smooth_posterior = smooth_posterior
 
+        self.alpha = 0.0001
+
     def particles_x(self):
         return self.back_particles[:, :self.dim_x]
 
@@ -62,16 +65,16 @@ class ParticleI2cCell():
     def backward_done(self):
         return self.back_particles is not None
 
-    def forward(self, particles, alpha=1.):
+    def forward(self, particles, alpha=1., use_time_alpha=False):
         new_u = self.u_prior.sample(self.num_p).reshape(-1, self.dim_u)
         # print(new_u)
         self.particles = np.concatenate([particles, new_u], 1)
         # print(particles)
-        self.weights = self.obs_lik(particles, new_u, alpha)
-        # print(self.weights)
+        if use_time_alpha:
+            self.weights = self.obs_lik(particles, new_u, self.alpha)
+        else:
+            self.weights = self.obs_lik(particles, new_u, alpha)
         norm = np.sum(self.weights)
-        # if norm == 0.:
-        #     print('Found 0')
         self.weights /= norm
         samples = np.random.choice(
             np.arange(self.num_p), 
@@ -117,7 +120,7 @@ class ParticleI2cCell():
         joint_prob = GMM(self.back_particles, 
             np.ones(len(self.back_particles))/len(self.back_particles), 
             self.smooth_posterior)
-        return joint_prob.conditional_sample(x, np.arange(self.sys.dim_x))
+        return joint_prob.conditional_max(x, np.arange(self.sys.dim_x))
 
     def update_u_prior(self):
         """Updates the prior for u by smoothing the posterior particle distribution 
@@ -127,6 +130,32 @@ class ParticleI2cCell():
             np.ones(len(self.back_particles))/len(self.back_particles), 
             self.smooth_prior)
         self.u_prior = smoothed_posterior.marginalize(np.arange(self.dim_x, self.dim_x+self.dim_u))
+
+    def update_alpha(self):
+        all_costs = self.cost(self.particles_x(), self.particles_u())
+        # self.alpha = np.sqrt(self.M/(costs**2))
+
+        def alpha_eq(a):
+            return np.sum(a * all_costs) - logsumexp(a * all_costs)
+
+        def alpha_der(a):
+            return np.sum(all_costs) - (np.sum(all_costs*np.exp(a*all_costs)))/(np.sum(np.exp(a*all_costs)))
+
+        # print(alpha_eq(self.alpha))
+        
+        if alpha_eq(self.alpha*1.1) > alpha_eq(self.alpha):
+            self.alpha *= 1.1
+        elif alpha_eq(self.alpha/1.1) > alpha_eq(self.alpha):
+            self.alpha /= 1.1
+
+        # import matplotlib.pyplot as plt
+
+        # x = np.linspace(0.00001, 0.0001, 1000)
+        # y = [alpha_eq(_x) for _x in x]
+        # print(x,y)
+        # plt.plot(x,y)
+        # plt.savefig('test.png')
+        # quit()
 
 
 class ParticleI2cGraph():
@@ -153,20 +182,36 @@ class ParticleI2cGraph():
 
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
 
-        self.init_alpha = 1.
+        self.init_costs()
 
-    def run(self):
-        alpha = self.init_alpha
+    def init_costs(self):
+        num_samples = 10000
+
+        s_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_x))
+        a_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_u))
+
+        self.sample_costs = self.cost(s_grid, a_grid)
+
+    def run(self, init_alpha, use_time_alpha=False):
+        if use_time_alpha:
+            for c in self.cells:
+                c.alpha = init_alpha
+        alpha = init_alpha
+        self._expectation(alpha, use_time_alpha)
         while True:
-            print(alpha)
-            self._expectation(alpha)
-            next_alpha = self._maximization(alpha)
-            if np.isclose(alpha, next_alpha):
+            # print(alpha)
+            self._expectation(alpha, use_time_alpha)
+            next_alpha = self._maximization(alpha, use_time_alpha)
+            if use_time_alpha:
+                print(np.mean([c.alpha for c in self.cells]))
+                if self.check_alpha_converged():
+                    break
+            elif np.isclose(alpha, next_alpha):
                 break
             alpha = next_alpha
         return alpha
 
-    def _expectation(self, alpha):
+    def _expectation(self, alpha, use_time_alpha=False):
         """Runs the forward, backward smoothing algorithm to estimate the
         current optimal state action trajectory
         
@@ -178,7 +223,7 @@ class ParticleI2cGraph():
 
         # run per cell loop
         for c in tqdm(self.cells):
-            particles = c.forward(particles, alpha)
+            particles = c.forward(particles, alpha, use_time_alpha)
         
         # initialize the backwards sample
         # here, the particles need to be weighted according to the final thing
@@ -188,7 +233,7 @@ class ParticleI2cGraph():
         # run backwards smoothing via sampling
         for c in tqdm(list(reversed(self.cells))):
             particles = c.backward(particles)
-            c.update_u_prior()
+            # c.update_u_prior()
         
         all_costs = []
         for c in self.cells:
@@ -196,21 +241,39 @@ class ParticleI2cGraph():
         all_costs = np.array(all_costs).flatten()
         print(np.mean(all_costs))
 
-    def _maximization(self, alpha):
+    def _maximization(self, alpha, use_time_alpha=False):
         # get all cost parameters
-        all_costs = []
-        for c in self.cells:
-            all_costs.append(self.cost(c.particles_x(), c.particles_u()))
-        all_costs = np.array(all_costs).flatten()
+        if use_time_alpha:
+            for c in self.cells:
+                c.update_alpha()
+            return 1.
+        else:
+            all_costs = []
+            for c in self.cells:
+                all_costs.append(np.sum(self.cost(c.particles_x(), c.particles_u())))
+            all_costs = np.array(all_costs)
 
-        # update alpha
-        def log_lik(a):
-            return -1 * (a * np.sum(all_costs) + self.T * np.log(1./(np.sum(np.exp(a * all_costs)))))
+            def alpha_eq(a):
+                return self.T * (np.mean(a * all_costs) - np.log(np.mean(np.exp(a * self.sample_costs))))
 
-        alpha = minimize(log_lik, alpha, method='nelder-mead', 
-            options={'xatol': 1e-8, 'disp': True}).x
-        print(alpha)
-        return alpha
+            def alpha_der(a):
+                return self.T * (np.mean(all_costs) - (np.mean(self.sample_costs*np.exp(a*self.sample_costs)))/(np.mean(np.exp(a*self.sample_costs))))
+
+            new_alpha = alpha + 1e-12 * alpha_der(alpha)
+
+            print(alpha_der(alpha))
+            print(alpha_eq(alpha))
+            print(alpha_eq(0))
+            print(alpha_eq(-0.001))
+
+            print(new_alpha)
+
+            assert (alpha_eq(new_alpha) >= alpha_eq(alpha)) and new_alpha > 0, '{} {} {}'.format(alpha_der(alpha), alpha_eq(new_alpha), alpha_eq(alpha))
+
+            return new_alpha
+
+    def check_alpha_converged(self):
+        return False
 
     def get_policy(self, x, i):
         return self.cells[i].policy(x)
