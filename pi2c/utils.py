@@ -187,22 +187,24 @@ class GMM(Distribution):
             pi {np.ndarray} -- weights of the mixture components
             sig {float} -- covariance of each mixture comp: np.eye() * sig
         """
+        self.num_components = len(pi)
         self.dim = mu.shape[1]
         self.sig_scale = sig
         self.sig = np.eye(self.dim) * sig
+        self.sig = np.tile(self.sig, (self.num_components, 1, 1))
         self.mu = mu
-        self.num_components = len(pi)
+        self.pi = pi
+        self.init_pdf()
 
+    def init_pdf(self):
         self.gaussians = []
         
-        for i in range(mu.shape[0]):
-            pdf = multivariate_normal(mu[i], sig)
+        for i in range(self.num_components):
+            pdf = multivariate_normal(self.mu[i], self.sig[i])
             self.gaussians.append(pdf)
-        
-        self.pi = pi
 
     def likelihood(self, x):
-        """COmputes the likelihood under the gmm using a weighted sum
+        """Computes the likelihood under the gmm using a weighted sum
         
         Arguments:
             x {[type]} -- [description]
@@ -276,6 +278,47 @@ class GMM(Distribution):
         cond = self.condition(x, idx)
         nn = np.argmax(cond.pi)
         return cond.mu[nn]
+
+    def update_parameters(self, samples):
+        converged = False
+
+        while not converged:
+            membership = self.e_step(samples)
+            converged = self.q_step(samples, membership)
+
+    def e_step(self, samples):
+        prob = []
+        for g, p in zip(self.gaussians, self.pi):
+            prob.append(p * g.pdf(samples))
+        prob = np.array(prob)
+        prob = prob/np.sum(prob, 0)
+        return prob.T
+
+    def m_step(self, samples, membership):
+        last_mu = self.mu.copy()
+        last_sig = self.sig.copy()
+        last_pi = self.pi.copy()
+
+        new_pi = np.mean(membership, 0)
+        norm = np.sum(membership, 0).reshape(-1, 1, 1)
+        new_mu = np.array(
+            [np.sum(membership[:, i:i+1] * samples, 0)/np.sum(membership[:, i])
+                for i in range(self.num_components)])
+        sig_estimates = np.array([[
+            (samples[j:j+1] - new_mu[i:i+1]).T.dot(samples[j:j+1] - new_mu[i:i+1])
+            for i in range(self.num_components)] for j in range(samples.shape[0])])
+        new_sig = np.sum(membership.reshape(-1, self.num_components, 1, 1) * sig_estimates, 0)/norm
+        converged = np.all(np.isclose(last_mu, new_mu))
+        converged = converged and np.all(np.isclose(last_pi, new_pi))
+        converged = converged and np.all(np.isclose(last_sig, new_sig))
+        self.mu = new_mu
+        self.pi = new_pi
+        self.sig = new_sig
+        self.init_pdf()
+        return converged
+
+    def copy(self):
+        return GMM(self.mu.copy(), self.pi.copy(), self.sig_scale)
 
 
 class GaussianPrior(Distribution):
