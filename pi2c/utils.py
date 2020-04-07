@@ -234,34 +234,22 @@ class GMM(Distribution):
         pi = self.pi.reshape(self.num_components, 1)
         return np.sum(self.mu * pi, 0)
 
-    def marginalize(self, idx):
-        """Marginalizes a continuous range of the GMM domain
-        and returns a GMM over that range
-        
-        Arguments:
-            idx {np.index_array} -- indices of the remaining observations
-        
-        Returns:
-            GMM -- A new mixture model
-        """
-        new_mu = self.mu[:, idx]
-        return GMM(new_mu, self.pi, self.sig_scale)
-
     def condition(self, x, idx):
         """Builds a new GMM which is conditioned on an observation
         Based on the derivation in https://stats.stackexchange.com/questions/348941/general-conditional-distributions-for-multivariate-gaussian-mixtures
+        
+        The current code assumes you are conditioning on a contiguous
+        region in the array starting from zero
 
         Arguments:
             x {np.array} -- observation to condition on
-            idx {np.index_array} -- index array of the observation
+            idx {int} -- index array of the observation
         """
-        obs_mask = np.zeros(self.dim, dtype=np.bool_)
-        obs_mask[idx] = True
-        var_mask = np.where(~obs_mask)[0]
-        
-        gmm_obs = self.marginalize(idx)
-        gmm_var = self.marginalize(var_mask)
-        
+        mu_var = self.mu[:, idx:]
+        gmm_var = GMM(mu_var, self.pi, self.sig_scale)
+        mu_obs = self.mu[:, :idx]
+        gmm_obs = GMM(mu_obs, self.pi, self.sig_scale)
+
         reweight = np.array([g.pdf(x) for g in gmm_obs.gaussians])
         reweight = gmm_var.pi * reweight
         reweight /= np.sum(reweight)
@@ -269,14 +257,24 @@ class GMM(Distribution):
 
         for i in range(self.num_components):
             # correction for 1 dim u (linalg doesn't invert that)
-            if len(var_mask) == 1:
-                sig_corr = self.sig[i][var_mask, idx] * 1/self.sig[i][idx, idx]
-            else:
-                sig_corr = self.sig[i][var_mask, idx].dot(
-                        np.linalg.inv(self.sig[i][idx, idx]))
-            gmm_var.mu[i] += sig_corr.dot(x - gmm_obs.mu[i])
-            gmm_var.sig[i] -= sig_corr.dot(self.sig[i][idx, var_mask])
-        gmm_var.init_pdf()
+            # print(mu_obs)
+            # print(mu_var)
+            # print(self.dim)
+            # print(idx)
+            # if (self.dim-idx) == 1:
+            #     sig_corr = self.sig[i][idx:, :idx] * 1/self.sig[i][:idx, :idx]
+            # else:
+            sig_corr = self.sig[i][idx:, :idx].dot(np.linalg.inv(self.sig[i][:idx, :idx]))
+            gmm_var.mu[i] += sig_corr.dot((x - gmm_obs.mu[i]))
+            gmm_var.sig[i] -= sig_corr.dot(self.sig[i][:idx, idx:])
+            try:
+                gmm_var.init_pdf()
+            except (np.linalg.linalg.LinAlgError, ValueError) as e:
+                print(self.sig[i])
+                print(self.sig[i][var_mask, idx])
+                print(self.sig[i][idx, idx])
+                print(gmm_var.sig[i])
+                quit()
         return gmm_var
 
     def conditional_mean(self, x, idx):
@@ -303,6 +301,7 @@ class GMM(Distribution):
             prob.append(p * g.pdf(samples))
         prob = np.array(prob)
         prob = prob/np.sum(prob, 0)
+        prob[np.isnan(prob)] = 1./self.num_components
         return prob.T
 
     def m_step(self, samples, membership):
@@ -319,13 +318,19 @@ class GMM(Distribution):
             (samples[j:j+1] - new_mu[i:i+1]).T.dot(samples[j:j+1] - new_mu[i:i+1])
             for i in range(self.num_components)] for j in range(samples.shape[0])])
         new_sig = np.sum(membership.reshape(-1, self.num_components, 1, 1) * sig_estimates, 0)/norm
-        converged = np.all(np.isclose(last_mu, new_mu))
-        converged = converged and np.all(np.isclose(last_pi, new_pi))
-        converged = converged and np.all(np.isclose(last_sig, new_sig))
         self.mu = new_mu
         self.pi = new_pi
         self.sig = new_sig
-        self.init_pdf()
+        try:
+            self.init_pdf()
+        except np.linalg.linalg.LinAlgError as e:
+            # print(self.sig)
+            new_sig += np.eye(self.dim) * 1.e-5
+            self.sig = new_sig
+            self.init_pdf()
+        converged = np.all(np.isclose(last_mu, new_mu))
+        converged = converged and np.all(np.isclose(last_pi, new_pi))
+        converged = converged and np.all(np.isclose(last_sig, new_sig))
         return converged
 
     def copy(self):

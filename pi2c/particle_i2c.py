@@ -51,7 +51,7 @@ class ParticleI2cCell():
         pi = np.array([1.] * gmm_components)/gmm_components
         # add small tither to GMM components to aid convergence of first round
         mu = np.tile(mu_u0.reshape(1, -1), (gmm_components, 1)) + \
-             np.random.randn(gmm_components, len(mu_u0)) * sig_u0/10.
+             np.random.randn(gmm_components, len(mu_u0)) * 10.
         self.u_prior = GMM(mu, pi, sig_u0)
 
         self.alpha = 0.0001
@@ -70,11 +70,13 @@ class ParticleI2cCell():
 
     def forward(self, particles, alpha=1., use_time_alpha=False):
         new_u = []
-        for i in range(self.num_p):
-            new_u.append(
-                self.u_prior.conditional_sample(particles[i], np.arange(self.dim_x), 1))
+        particles = np.repeat(particles, 10, 0)
+        for i in range(self.num_p//10):
+            u_prior = self.u_prior.condition(particles[i], self.dim_x)
+            u = u_prior.sample(10).reshape(10, -1)
+            new_u.append(u)
         # print(new_u)
-        new_u = np.array(new_u)
+        new_u = np.concatenate(new_u, 0)
         self.particles = np.concatenate([particles, new_u], 1)
         # print(particles)
         if use_time_alpha:
@@ -85,7 +87,7 @@ class ParticleI2cCell():
         self.weights /= norm
         samples = np.random.choice(
             np.arange(self.num_p), 
-            size=self.num_p, 
+            size=self.num_p//10, 
             replace=True, 
             p=self.weights)
         new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
@@ -95,6 +97,7 @@ class ParticleI2cCell():
     def backward(self, particles):
         backwards = []
         smoothing_weights = []
+        all_samples = []
         for p in particles:
             p = p.reshape(-1, 1)
             # get f(x_t+1|x_t)
@@ -109,10 +112,12 @@ class ParticleI2cCell():
                 size=1, 
                 replace=True, 
                 p=particle_likelihood)
+            all_samples.append(samples)
             # save backwards sample
             backwards.append(self.particles[samples].reshape(-1))
             # save smoothing weights
             smoothing_weights.append(particle_likelihood)
+        print(len(np.unique(np.array(all_samples).reshape(-1))))
         self.back_particles = np.array(backwards)
         self.back_weights = np.array(smoothing_weights)
         return np.array(self.back_particles)[:, :self.dim_x]
@@ -127,7 +132,7 @@ class ParticleI2cCell():
         joint_prob = GMM(self.back_particles, 
             np.ones(len(self.back_particles))/len(self.back_particles), 
             self.smooth_posterior)
-        return joint_prob.conditional_max(x, np.arange(self.sys.dim_x))
+        return joint_prob.conditional_max(x, self.sys.dim_x)
 
     def update_u_prior(self):
         """Updates the prior for u by smoothing the posterior particle distribution 
@@ -167,7 +172,7 @@ class ParticleI2cCell():
 
 class ParticleI2cGraph():
     
-    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, gmm_components=4):
+    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, gmm_components=1):
         """[summary]
         
         Arguments:
@@ -204,7 +209,7 @@ class ParticleI2cGraph():
             for c in self.cells:
                 c.alpha = init_alpha
         alpha = init_alpha
-        self._expectation(alpha, use_time_alpha)
+        # self._expectation(alpha, use_time_alpha)
         while True:
             # print(alpha)
             self._expectation(alpha, use_time_alpha)
@@ -226,7 +231,7 @@ class ParticleI2cGraph():
             alpha {float} -- the current alpha optimization parameter
         """
         # sample initial x from the systems inital distribution
-        particles = self.x0_dist.sample(self.num_p)
+        particles = self.x0_dist.sample(self.num_p//10)
 
         # run per cell loop
         for c in tqdm(self.cells):
@@ -234,7 +239,7 @@ class ParticleI2cGraph():
         
         # initialize the backwards sample
         # here, the particles need to be weighted according to the final thing
-        backwards_samples = np.random.choice(np.arange(self.num_p), self.M)
+        backwards_samples = np.random.choice(np.arange(self.num_p//10), self.M)
         particles = particles[backwards_samples]
 
         # run backwards smoothing via sampling
@@ -250,7 +255,8 @@ class ParticleI2cGraph():
 
     def _maximization(self, alpha, use_time_alpha=False):
         ## JOINT UPDATE
-        for c in self.cells:
+        for c in reversed(self.cells):
+            # print(np.var(c.back_particles, 0))
             c.u_prior.update_parameters(c.back_particles)
         ## ALPHA UPDATE
 

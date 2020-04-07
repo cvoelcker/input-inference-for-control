@@ -106,7 +106,7 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
     def __init__(self, duration):
         self.duration = duration
         self.a = self.a.reshape((-1, 1)) # give me strength...
-        self.sig_x_noise = 0.0000001
+        self.sig_x_noise = 0.1
         self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
 
     def init_env(self):
