@@ -32,9 +32,9 @@ mu1 = np.array([1., 1.])
 mu2 = np.array([0., 0.])
 mu3 = np.array([-1., -1.])
 
-samples1 = np.random.multivariate_normal(mu1, cov1, 300 * 5)
-samples2 = np.random.multivariate_normal(mu2, cov2, 100 * 5)
-samples3 = np.random.multivariate_normal(mu3, cov3, 200 * 5)
+samples1 = np.random.multivariate_normal(mu1, cov1, 300)
+samples2 = np.random.multivariate_normal(mu2, cov2, 100)
+samples3 = np.random.multivariate_normal(mu3, cov3, 200)
 
 samples = np.concatenate([samples1, samples2, samples3], 0)
 

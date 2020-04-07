@@ -246,9 +246,10 @@ class GMM(Distribution):
             idx {int} -- index array of the observation
         """
         mu_var = self.mu[:, idx:]
-        gmm_var = GMM(mu_var, self.pi, self.sig_scale)
         mu_obs = self.mu[:, :idx]
+
         gmm_obs = GMM(mu_obs, self.pi, self.sig_scale)
+        gmm_var = GMM(mu_var, self.pi, self.sig_scale)
 
         reweight = np.array([g.pdf(x) for g in gmm_obs.gaussians])
         reweight = gmm_var.pi * reweight
