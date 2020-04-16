@@ -89,7 +89,7 @@ class TrajectoryEvaluator(object):
 
     def dist(self, y):
         err = y.reshape(-1, 1) - self.sg
-        return err.T.dot(self.W.dot(err))[0,0]
+        return (err.T @ self.W @ err)[0,0]
 
     def _eval_traj(self, y):
         return sum([self.dist(y[i,:])
@@ -252,8 +252,8 @@ class GMM(Distribution):
             x {np.array} -- observation to condition on
             idx {int} -- index array of the observation
         """
-        mu_var = self.mu[:, idx:].copy()
-        mu_obs = self.mu[:, :idx].copy()
+        mu_var = self.mu[:, idx:]
+        mu_obs = self.mu[:, :idx]
 
         gmm_obs = GMM(mu_obs, self.pi, self.var_scale)
         gmm_var = GMM(mu_var, self.pi, self.var_scale)
@@ -274,10 +274,14 @@ class GMM(Distribution):
                 # not perfect, fixes the eigenvalues
                 gmm_var.var[i] += np.eye(gmm_var.dim) * (-1 * np.min(np.linalg.eig(gmm_var.var[i])[0]) + 10)
                 gmm_var.init_pdf()
+
         return gmm_var
 
     def conditional_mean(self, x, idx):
-        return self.condition(x, idx).mean()
+        mean = self.condition(x, idx).mean()
+        if np.isnan(mean):
+            return np.array(0.)
+        return mean
 
     def conditional_sample(self, x, idx, n):
         return self.condition(x, idx).sample(n)
@@ -323,6 +327,7 @@ class GMM(Distribution):
         try:
             self.init_pdf()
         except np.linalg.linalg.LinAlgError as e:
+            print(self.var)
             new_var += np.eye(self.dim) * 1.e-5
             self.var = new_var
             self.init_pdf()

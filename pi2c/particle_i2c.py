@@ -53,8 +53,8 @@ class ParticleI2cCell():
         mu = np.tile(mu_u0.reshape(1, -1), (gmm_components, 1)) + \
              np.random.randn(gmm_components, len(mu_u0)) * 1.
         self.u_prior = GMM(mu, pi, sig_u0)
+
         self.u_samples = u_samples
-        self.alpha = 0.0001
 
     def particles_x(self):
         return self.back_particles[:, :self.dim_x]
@@ -127,10 +127,7 @@ class ParticleI2cCell():
         Arguments:
             x {np.ndarray} -- current position of the system
         """
-        joint_prob = GMM(self.back_particles, 
-            np.ones(len(self.back_particles))/len(self.back_particles), 
-            self.smooth_posterior)
-        return joint_prob.conditional_max(x, self.sys.dim_x)
+        return self.u_prior.conditional_mean(x, self.dim_x)
 
     def update_u_prior(self):
         """Updates the prior for u by smoothing the posterior particle distribution 
@@ -142,6 +139,8 @@ class ParticleI2cCell():
         self.u_prior = smoothed_posterior.marginalize(np.arange(self.dim_x, self.dim_x+self.dim_u))
 
     def update_alpha(self):
+        """Not done
+        """
         all_costs = self.cost(self.particles_x(), self.particles_u())
 
         def alpha_eq(a):
@@ -149,12 +148,7 @@ class ParticleI2cCell():
 
         def alpha_der(a):
             return np.sum(all_costs) - (np.sum(all_costs*np.exp(a*all_costs)))/(np.sum(np.exp(a*all_costs)))
-
-        if alpha_eq(self.alpha*1.1) > alpha_eq(self.alpha):
-            self.alpha *= 1.1
-        elif alpha_eq(self.alpha/1.1) > alpha_eq(self.alpha):
-            self.alpha /= 1.1
-
+    
     def current_backward_costs(self):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
         return c.mean(), c.var()
@@ -184,24 +178,34 @@ class ParticleI2cGraph():
             self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, gmm_components, u_samples))
 
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
-
         self.num_runs = num_runs
 
-    def run(self, init_alpha, use_time_alpha=False):
+    def init_costs(self):
+        """Get an MC estimate of the current cost function integral (currently not used)
+        """
+        num_samples = 10000
+
+        s_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_x))
+        a_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_u))
+
+        self.sample_costs = self.cost(s_grid, a_grid)
+
+    def run(self, init_alpha, use_time_alpha=False, max_iter=1000):
         if use_time_alpha:
             for c in self.cells:
                 c.alpha = init_alpha
         alpha = init_alpha
-        iteration = 0
-        while True:
-            self._expectation(alpha, iteration, use_time_alpha)
+        _iter = 0
+        while True and _iter < max_iter:
+            self._expectation(alpha, use_time_alpha)
             next_alpha = self._maximization(alpha, use_time_alpha)
             alpha = alpha + 0.1 * init_alpha
             if use_time_alpha and self.check_alpha_converged():
                     break
             elif np.isclose(alpha, next_alpha):
                 break
-            iteration += 1
+            alpha = next_alpha
+            _iter += 1
         return alpha
 
     def _expectation(self, alpha, iteration, use_time_alpha=False):

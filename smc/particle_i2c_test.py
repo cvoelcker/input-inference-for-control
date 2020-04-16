@@ -34,6 +34,13 @@ def build_sys(n):
     env = make_env(exp)
     return env
 
+def eval_controller(n, controller,system, cost):
+    x = system.init_env()
+    for i in range(n):
+        print(x)
+        u = controller.get_policy(x.flatten(), i).reshape(-1,1)
+        x = system.forward(u)
+
 
 if __name__ == "__main__":
     num_p = int(sys.argv[1])
@@ -42,16 +49,14 @@ if __name__ == "__main__":
     print('Hello')
     cost, prob = build_q()
     sys = build_sys(100)
-    sys.init_env()
-    
-    # .... somewhere in your code
-    # interact(local=locals())
-    
     
     particle_graph = ParticleI2cGraph(
         sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 1., np.array([0., 0., 0.]), 10000., 1, u_samples, num_runs)
+    
     for i in range(100):
-        alpha = 1e-4
+        eval_controller(100, particle_graph, sys, cost)
+        sys.init_env()
+        alpha = 0.0001
         alpha = particle_graph.run(alpha, False)
         
         print('Updated graph {}'.format(i))

@@ -93,7 +93,7 @@ class LinearSim(env_def.LinearDef, BaseSim):
         self.a = self.a.reshape((-1,1)) # give me strength... # sorry Joe
 
     def init_env(self):
-        self.x = np.copy(self.x0).squeeze()
+        self.x = np.copy(self.x0)
         return self.x
 
     def forward(self, u):
@@ -110,10 +110,13 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
 
     def init_env(self):
-        self.x = np.copy(self.x0).squeeze()
+        self.x = np.copy(self.x0)
         return self.x
 
     def forward(self, u):
+        Ax = self.A @ self.x
+        Bu = self.B @ u
+        dyn_x = Ax + Bu + self.a
         x = self.A.dot(self.x) + self.B.dot(u) + self.a + np.random.randn(*self.x.shape) * self.sig_x_noise
         self.x = x.reshape(self.x.shape)
         return self.x
