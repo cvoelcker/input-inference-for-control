@@ -20,7 +20,7 @@ from pi2c.cost_function import Cost2Prob
 
 class ParticleI2cCell():
 
-    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0=100., gmm_components=4):
+    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0=100., gmm_components=4, u_samples=10):
         """Initializes a particel swarm cell at a specific time index
         
         Arguments:
@@ -51,9 +51,9 @@ class ParticleI2cCell():
         pi = np.array([1.] * gmm_components)/gmm_components
         # add small tither to GMM components to aid convergence of first round
         mu = np.tile(mu_u0.reshape(1, -1), (gmm_components, 1)) + \
-             np.random.randn(gmm_components, len(mu_u0)) * 10.
+             np.random.randn(gmm_components, len(mu_u0)) * 1.
         self.u_prior = GMM(mu, pi, sig_u0)
-
+        self.u_samples = u_samples
         self.alpha = 0.0001
 
     def particles_x(self):
@@ -68,47 +68,46 @@ class ParticleI2cCell():
     def backward_done(self):
         return self.back_particles is not None
 
-    def forward(self, particles, alpha=1., use_time_alpha=False):
+    def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
         new_u = []
-        particles = np.repeat(particles, 10, 0)
-        for i in range(self.num_p//10):
+        particles = np.repeat(particles, self.u_samples, 0)
+        for i in range(self.num_p//self.u_samples):
             u_prior = self.u_prior.condition(particles[i], self.dim_x)
-            u = u_prior.sample(10).reshape(10, -1)
+            u = u_prior.sample(self.u_samples).reshape(self.u_samples, -1)
             new_u.append(u)
-        # print(new_u)
         new_u = np.concatenate(new_u, 0)
-        self.particles = np.concatenate([particles, new_u], 1)
-        # print(particles)
         if use_time_alpha:
             self.weights = self.obs_lik(particles, new_u, self.alpha)
         else:
             self.weights = self.obs_lik(particles, new_u, alpha)
         norm = np.sum(self.weights)
+        # if all particle weights are numerically impossible to compute
+        # the run is seen as failed
+        if norm == 0.:
+            failed = True
         self.weights /= norm
         samples = np.random.choice(
             np.arange(self.num_p), 
-            size=self.num_p//10, 
+            size=self.num_p//self.u_samples, 
             replace=True, 
             p=self.weights)
+        self.particles = np.concatenate([particles, new_u], 1)[samples]
         new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
-        # print(new_particles)
-        return new_particles
+        return new_particles, failed
 
     def backward(self, particles):
         backwards = []
         smoothing_weights = []
         all_samples = []
         for p in particles:
-            p = p.reshape(-1, 1)
-            # get f(x_t+1|x_t)
+            p = p[:self.dim_x].reshape(-1, 1)
             particle_likelihood = self.sys.likelihood(
                 self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p)
             # renormalize
             particle_likelihood /= np.sum(particle_likelihood)
-            # print(particle_likelihood)
             # sample likely ancestor
             samples = np.random.choice(
-                np.arange(self.num_p), 
+                np.arange(self.num_p//self.u_samples), 
                 size=1, 
                 replace=True, 
                 p=particle_likelihood)
@@ -117,10 +116,9 @@ class ParticleI2cCell():
             backwards.append(self.particles[samples].reshape(-1))
             # save smoothing weights
             smoothing_weights.append(particle_likelihood)
-        print(len(np.unique(np.array(all_samples).reshape(-1))))
         self.back_particles = np.array(backwards)
         self.back_weights = np.array(smoothing_weights)
-        return np.array(self.back_particles)[:, :self.dim_x]
+        return np.array(self.back_particles)
 
     def policy(self, x):
         """Extracts a policy from the posterior particle GMM
@@ -145,7 +143,6 @@ class ParticleI2cCell():
 
     def update_alpha(self):
         all_costs = self.cost(self.particles_x(), self.particles_u())
-        # self.alpha = np.sqrt(self.M/(costs**2))
 
         def alpha_eq(a):
             return np.sum(a * all_costs) - logsumexp(a * all_costs)
@@ -153,26 +150,19 @@ class ParticleI2cCell():
         def alpha_der(a):
             return np.sum(all_costs) - (np.sum(all_costs*np.exp(a*all_costs)))/(np.sum(np.exp(a*all_costs)))
 
-        # print(alpha_eq(self.alpha))
-        
         if alpha_eq(self.alpha*1.1) > alpha_eq(self.alpha):
             self.alpha *= 1.1
         elif alpha_eq(self.alpha/1.1) > alpha_eq(self.alpha):
             self.alpha /= 1.1
 
-        # import matplotlib.pyplot as plt
-
-        # x = np.linspace(0.00001, 0.0001, 1000)
-        # y = [alpha_eq(_x) for _x in x]
-        # print(x,y)
-        # plt.plot(x,y)
-        # plt.savefig('test.png')
-        # quit()
+    def current_backward_costs(self):
+        c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
+        return c.mean(), c.var()
 
 
 class ParticleI2cGraph():
     
-    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, gmm_components=1):
+    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, gmm_components=1, u_samples=100, num_runs=10):
         """[summary]
         
         Arguments:
@@ -187,109 +177,93 @@ class ParticleI2cGraph():
         self.T = T
         self.num_p = num_p
         self.M = M
+        self.u_samples = u_samples
 
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, gmm_components))
+            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, gmm_components, u_samples))
 
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
 
-        self.init_costs()
-
-    def init_costs(self):
-        num_samples = 10000
-
-        s_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_x))
-        a_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_u))
-
-        self.sample_costs = self.cost(s_grid, a_grid)
+        self.num_runs = num_runs
 
     def run(self, init_alpha, use_time_alpha=False):
         if use_time_alpha:
             for c in self.cells:
                 c.alpha = init_alpha
         alpha = init_alpha
-        # self._expectation(alpha, use_time_alpha)
+        iteration = 0
         while True:
-            # print(alpha)
-            self._expectation(alpha, use_time_alpha)
+            self._expectation(alpha, iteration, use_time_alpha)
             next_alpha = self._maximization(alpha, use_time_alpha)
-            if use_time_alpha:
-                print(np.mean([c.alpha for c in self.cells]))
-                if self.check_alpha_converged():
+            alpha = alpha + 0.1 * init_alpha
+            if use_time_alpha and self.check_alpha_converged():
                     break
             elif np.isclose(alpha, next_alpha):
                 break
-            alpha = next_alpha
+            iteration += 1
         return alpha
 
-    def _expectation(self, alpha, use_time_alpha=False):
+    def _expectation(self, alpha, iteration, use_time_alpha=False):
         """Runs the forward, backward smoothing algorithm to estimate the
         current optimal state action trajectory
         
         Arguments:
             alpha {float} -- the current alpha optimization parameter
         """
-        # sample initial x from the systems inital distribution
-        particles = self.x0_dist.sample(self.num_p//10)
+        all_samples = []
+        failed_counter = 0
+        i = self.num_runs
+        num_seq_failed = 0
+        with tqdm(total=self.num_runs) as pbar:
+            while i > 0:
+                run_samples = []
+                # sample initial x from the systems inital distribution
+                particles = self.x0_dist.sample(self.num_p//self.u_samples)
+                
+                failed = False
+                # run per cell loop
+                for c in self.cells:
+                    n_particles, failed = c.forward(particles, iteration, failed, alpha, use_time_alpha)
+                    # check if all particle trajectories have a numeric probability of 0
+                    if failed:
+                        num_seq_failed += 1
+                        break
+                    particles = n_particles
+                if not failed:
+                    num_seq_failed = 0
+                    # initialize the backwards sample
+                    # here, the particles need to be weighted according to the final thing
+                    if self.M > self.num_p//self.u_samples:
+                        self.M = self.num_p//self.u_samples
+                    backwards_samples = np.random.choice(np.arange(self.num_p//self.u_samples), self.M)
+                    particles = particles[backwards_samples]
+                    
+                    # run backwards smoothing via sampling
+                    for c in list(reversed(self.cells)):
+                        particles = c.backward(particles)
+                        run_samples.append(particles)
+                    all_samples.append(run_samples)
+                    i -= 1
+                    pbar.update(1)
+        all_samples = np.concatenate(all_samples, 1)
 
-        # run per cell loop
-        for c in tqdm(self.cells):
-            particles = c.forward(particles, alpha, use_time_alpha)
+        for i, c in enumerate(list(reversed(self.cells))):
+            c.back_particles = all_samples[i]
         
-        # initialize the backwards sample
-        # here, the particles need to be weighted according to the final thing
-        backwards_samples = np.random.choice(np.arange(self.num_p//10), self.M)
-        particles = particles[backwards_samples]
-
-        # run backwards smoothing via sampling
-        for c in tqdm(list(reversed(self.cells))):
-            particles = c.backward(particles)
-            # c.update_u_prior()
-        
-        all_costs = []
-        for c in self.cells:
-            all_costs.append(self.cost(c.particles_x(), c.particles_u()))
-        all_costs = np.array(all_costs).flatten()
-        print(np.mean(all_costs))
-
     def _maximization(self, alpha, use_time_alpha=False):
         ## JOINT UPDATE
-        for c in reversed(self.cells):
-            # print(np.var(c.back_particles, 0))
+        ll = 0.
+        v = 0.
+        for i, c in tqdm(list(enumerate(self.cells))):
             c.u_prior.update_parameters(c.back_particles)
-        ## ALPHA UPDATE
-
-
-        # # get all cost parameters
-        # if use_time_alpha:
-        #     for c in self.cells:
-        #         c.update_alpha()
-        #     return 1.
-        # else:
-        #     all_costs = []
-        #     for c in self.cells:
-        #         all_costs.append(np.sum(self.cost(c.particles_x(), c.particles_u())))
-        #     all_costs = np.array(all_costs)
-
-        #     def alpha_eq(a):
-        #         return self.T * (np.mean(a * all_costs) - np.log(np.mean(np.exp(a * self.sample_costs))))
-
-        #     def alpha_der(a):
-        #         return self.T * (np.mean(all_costs) - (np.mean(self.sample_costs*np.exp(a*self.sample_costs)))/(np.mean(np.exp(a*self.sample_costs))))
-
-        #     new_alpha = alpha + 1e-12 * alpha_der(alpha)
-
-        #     print(alpha_der(alpha))
-        #     print(alpha_eq(alpha))
-        #     print(alpha_eq(0))
-        #     print(alpha_eq(-0.001))
-
-        #     print(new_alpha)
-
-        #     assert (alpha_eq(new_alpha) >= alpha_eq(alpha)) and new_alpha > 0, '{} {} {}'.format(alpha_der(alpha), alpha_eq(new_alpha), alpha_eq(alpha))
-
-        #     return new_alpha
+            r = c.current_backward_costs()
+            ll += r[0]
+            v  += r[1]
+        print(self.cells[-1].back_particles.mean(0))
+        print(self.cells[-1].back_particles.var(0))
+        print(ll/100.)
+        print(v/100.)
         return alpha
 
     def check_alpha_converged(self):

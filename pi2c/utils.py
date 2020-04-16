@@ -189,19 +189,21 @@ class GMM(Distribution):
         """
         self.num_components = len(pi)
         self.dim = mu.shape[1]
-        self.sig_scale = sig
-        self.sig = np.eye(self.dim) * sig
-        self.sig = np.tile(self.sig, (self.num_components, 1, 1))
+        self.var_scale = sig
+        self.var = np.eye(self.dim) * sig
+        self.var = np.tile(self.var, (self.num_components, 1, 1))
         self.mu = mu
         self.pi = pi
         self.init_pdf()
 
     def init_pdf(self):
         self.gaussians = []
-        
+        self.sig = []
         for i in range(self.num_components):
-            pdf = multivariate_normal(self.mu[i], self.sig[i])
-            self.gaussians.append(pdf)
+            self.sig.append(np.linalg.cholesky(self.var[i]))
+            pdf = multivariate_normal(self.mu[i], self.var[i])
+            self.gaussians.append(pdf)#
+        self.sig = np.array(self.sig)
 
     def likelihood(self, x):
         """Computes the likelihood under the gmm using a weighted sum
@@ -220,15 +222,20 @@ class GMM(Distribution):
         Arguments:
             n {int} -- number of samples to draw
         """
-        samples = []
         comp = np.random.choice(
             np.arange(self.num_components), 
             size=n, 
             replace=True, 
             p=self.pi)
-        for c in comp:
-            samples.append(self.gaussians[c].rvs())
-        return np.array(samples)
+        
+        ran = np.random.randn(n, 1, self.dim)
+        # print((self.mu[comp]).shape)
+        # print(ran.shape)
+        # print(self.sig[comp].shape)
+
+        samples = self.mu[comp].reshape(n, 1, -1) + ran @ self.sig[comp]
+
+        return samples.reshape(n)
 
     def mean(self):
         pi = self.pi.reshape(self.num_components, 1)
@@ -245,11 +252,11 @@ class GMM(Distribution):
             x {np.array} -- observation to condition on
             idx {int} -- index array of the observation
         """
-        mu_var = self.mu[:, idx:]
-        mu_obs = self.mu[:, :idx]
+        mu_var = self.mu[:, idx:].copy()
+        mu_obs = self.mu[:, :idx].copy()
 
-        gmm_obs = GMM(mu_obs, self.pi, self.sig_scale)
-        gmm_var = GMM(mu_var, self.pi, self.sig_scale)
+        gmm_obs = GMM(mu_obs, self.pi, self.var_scale)
+        gmm_var = GMM(mu_var, self.pi, self.var_scale)
 
         reweight = np.array([g.pdf(x) for g in gmm_obs.gaussians])
         reweight = gmm_var.pi * reweight
@@ -257,25 +264,16 @@ class GMM(Distribution):
         gmm_var.pi = reweight
 
         for i in range(self.num_components):
-            # correction for 1 dim u (linalg doesn't invert that)
-            # print(mu_obs)
-            # print(mu_var)
-            # print(self.dim)
-            # print(idx)
-            # if (self.dim-idx) == 1:
-            #     sig_corr = self.sig[i][idx:, :idx] * 1/self.sig[i][:idx, :idx]
-            # else:
-            sig_corr = self.sig[i][idx:, :idx].dot(np.linalg.inv(self.sig[i][:idx, :idx]))
-            gmm_var.mu[i] += sig_corr.dot((x - gmm_obs.mu[i]))
-            gmm_var.sig[i] -= sig_corr.dot(self.sig[i][:idx, idx:])
+            var_corr = self.var[i][idx:, :idx].dot(np.linalg.inv(self.var[i][:idx, :idx]))
+            gmm_var.mu[i] += var_corr.dot((x - gmm_obs.mu[i]))
+            gmm_var.var[i] -= var_corr.dot(self.var[i][:idx, idx:])
             try:
                 gmm_var.init_pdf()
             except (np.linalg.linalg.LinAlgError, ValueError) as e:
-                print(self.sig[i])
-                print(self.sig[i][var_mask, idx])
-                print(self.sig[i][idx, idx])
-                print(gmm_var.sig[i])
-                quit()
+                # find good recovery strategy, currently dificult
+                # not perfect, fixes the eigenvalues
+                gmm_var.var[i] += np.eye(gmm_var.dim) * (-1 * np.min(np.linalg.eig(gmm_var.var[i])[0]) + 10)
+                gmm_var.init_pdf()
         return gmm_var
 
     def conditional_mean(self, x, idx):
@@ -307,7 +305,7 @@ class GMM(Distribution):
 
     def m_step(self, samples, membership):
         last_mu = self.mu.copy()
-        last_sig = self.sig.copy()
+        last_var = self.var.copy()
         last_pi = self.pi.copy()
 
         new_pi = np.mean(membership, 0)
@@ -315,27 +313,26 @@ class GMM(Distribution):
         new_mu = np.array(
             [np.sum(membership[:, i:i+1] * samples, 0)/np.sum(membership[:, i])
                 for i in range(self.num_components)])
-        sig_estimates = np.array([[
+        var_estimates = np.array([[
             (samples[j:j+1] - new_mu[i:i+1]).T.dot(samples[j:j+1] - new_mu[i:i+1])
             for i in range(self.num_components)] for j in range(samples.shape[0])])
-        new_sig = np.sum(membership.reshape(-1, self.num_components, 1, 1) * sig_estimates, 0)/norm
+        new_var = np.sum(membership.reshape(-1, self.num_components, 1, 1) * var_estimates, 0)/norm
         self.mu = new_mu
         self.pi = new_pi
-        self.sig = new_sig
+        self.var = new_var
         try:
             self.init_pdf()
         except np.linalg.linalg.LinAlgError as e:
-            # print(self.sig)
-            new_sig += np.eye(self.dim) * 1.e-5
-            self.sig = new_sig
+            new_var += np.eye(self.dim) * 1.e-5
+            self.var = new_var
             self.init_pdf()
         converged = np.all(np.isclose(last_mu, new_mu))
         converged = converged and np.all(np.isclose(last_pi, new_pi))
-        converged = converged and np.all(np.isclose(last_sig, new_sig))
+        converged = converged and np.all(np.isclose(last_var, new_var))
         return converged
 
     def copy(self):
-        return GMM(self.mu.copy(), self.pi.copy(), self.sig_scale)
+        return GMM(self.mu.copy(), self.pi.copy(), self.var_scale)
 
 
 class GaussianPrior(Distribution):

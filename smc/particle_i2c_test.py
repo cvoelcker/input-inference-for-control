@@ -37,6 +37,8 @@ def build_sys(n):
 
 if __name__ == "__main__":
     num_p = int(sys.argv[1])
+    u_samples = int(sys.argv[2])
+    num_runs = int(sys.argv[3])
     print('Hello')
     cost, prob = build_q()
     sys = build_sys(100)
@@ -47,9 +49,9 @@ if __name__ == "__main__":
     
     
     particle_graph = ParticleI2cGraph(
-        sys, cost, 100, num_p, num_p//1, np.array([5., 5.]), 0.00001, np.array([0., 0., 0.]), 10000., 1)
+        sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 1., np.array([0., 0., 0.]), 10000., 1, u_samples, num_runs)
     for i in range(100):
-        alpha = 0.0001
+        alpha = 1e-4
         alpha = particle_graph.run(alpha, False)
         
         print('Updated graph {}'.format(i))
