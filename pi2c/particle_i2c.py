@@ -184,6 +184,8 @@ class ParticleI2cGraph():
         # borrowed from the quadratic cost assumption
         self.sigXi0 = np.linalg.inv(self.cost.QR)
 
+        self.UPDATE_ALPHA = True
+
     def init_costs(self):
         """Get an MC estimate of the current cost function integral (currently not used)
         """
@@ -272,6 +274,8 @@ class ParticleI2cGraph():
         print(self.cells[-1].back_particles.var(0))
         print(ll/100.)
         print(v/100.)
+        if self.UPDATE_ALPHA:
+            alpha = self._alpha_update()
         return alpha
 
     def _alpha_update(self):
