@@ -52,7 +52,7 @@ class ParticleI2cCell():
         # add small tither to GMM components to aid convergence of first round
         mu = np.tile(mu_u0.reshape(1, -1), (gmm_components, 1)) + \
              np.random.randn(gmm_components, len(mu_u0)) * 1.
-        self.u_prior = GMM(mu, pi, sig_u0)
+        self.xu_joint = GMM(mu, pi, sig_u0)
 
         self.u_samples = u_samples
 
@@ -72,8 +72,8 @@ class ParticleI2cCell():
         new_u = []
         particles = np.repeat(particles, self.u_samples, 0)
         for i in range(self.num_p//self.u_samples):
-            u_prior = self.u_prior.condition(particles[i], self.dim_x)
-            u = u_prior.sample(self.u_samples).reshape(self.u_samples, -1)
+            xu_joint = self.xu_joint.condition(particles[i], self.dim_x)
+            u = xu_joint.sample(self.u_samples).reshape(self.u_samples, -1)
             new_u.append(u)
         new_u = np.concatenate(new_u, 0)
         if use_time_alpha:
@@ -127,16 +127,16 @@ class ParticleI2cCell():
         Arguments:
             x {np.ndarray} -- current position of the system
         """
-        return self.u_prior.conditional_mean(x, self.dim_x)
+        return self.xu_joint.conditional_mean(x, self.dim_x)
 
-    def update_u_prior(self):
+    def update_xu_joint(self):
         """Updates the prior for u by smoothing the posterior particle distribution 
         with a kernel density estimator
         """
         smoothed_posterior = GMM(self.back_particles, 
             np.ones(len(self.back_particles))/len(self.back_particles), 
             self.smooth_prior)
-        self.u_prior = smoothed_posterior.marginalize(np.arange(self.dim_x, self.dim_x+self.dim_u))
+        self.xu_joint = smoothed_posterior.marginalize(np.arange(self.dim_x, self.dim_x+self.dim_u))
 
     def update_alpha(self):
         """Not done
@@ -177,8 +177,12 @@ class ParticleI2cGraph():
         for t in range(T):
             self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, gmm_components, u_samples))
 
+        self.gmm_components = gmm_components
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
         self.num_runs = num_runs
+        
+        # borrowed from the quadratic cost assumption
+        self.sigXi0 = np.linalg.inv(self.cost.QR)
 
     def init_costs(self):
         """Get an MC estimate of the current cost function integral (currently not used)
@@ -260,7 +264,7 @@ class ParticleI2cGraph():
         ll = 0.
         v = 0.
         for i, c in tqdm(list(enumerate(self.cells))):
-            c.u_prior.update_parameters(c.back_particles)
+            c.xu_joint.update_parameters(c.back_particles)
             r = c.current_backward_costs()
             ll += r[0]
             v  += r[1]
@@ -269,6 +273,73 @@ class ParticleI2cGraph():
         print(ll/100.)
         print(v/100.)
         return alpha
+
+    def _alpha_update(self):
+        # aka update alpha
+        # also has a time-varying alpha idea that was bad (but exciting)
+        # we should probably recheck that with the particle filter, since it might
+        # help with variance issues
+        nan_traj = False
+        s_covar = np.zeros((self.sys.dim_y, self.sys.dim_y))
+        for i, c in enumerate(self.cells):
+            for comp in range(self.gmm_components):
+                if np.any(np.isnan(c.xu_joint.mu[comp])):
+                    print("y_m is nan")
+                    nan_traj = True
+                else:
+                    err = c.mu  - self.cost.zg
+                    s_covar_t = (err.dot(err.T) + c.xu_joint.sig[comp])
+                    s_covar += c.xu_joint.pi[comp] * s_covar_t
+
+                    # logging, figure out later
+                    # tv = np.trace(np.linalg.solve(self.sigXi0, s_covar_t)) / float(self.sys.dim_y)
+                    # self.alpha_tv[i] = np.clip(tv, 0.5, 50)
+            s_covar = s_covar / float(self.T)
+            s_covar = (s_covar + s_covar.T) / 2.0
+
+            alpha_update = np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y)
+
+        # error logging
+        if nan_traj:
+            print("ERROR, trajectory is nan")
+        elif np.isnan(alpha_update):
+            print("ERROR, alpha is nan, s_covar {}".format(s_covar))
+        
+        # actual alpha update
+        else:
+            if not alpha_update > 0.0:
+                print("S covar bad")
+                print(s_covar)
+                print(np.linalg.det(s_covar))
+                print(np.linalg.eig(s_covar))
+                print(self.sigXi0)
+                # self.plot_traj(
+                #     -1, dir_name=self.res_dir,
+                #     filename="bad_alpha")
+                raise ValueError("{} <= 0.0".format(alpha_update))
+
+            print(alpha_update)
+            return alpha_update
+
+
+            # get into update ratio reasoning later, might be crucial for particle
+            # variance reasons, especially in the early steps
+
+            # alpha_update_ratio = alpha_update / self.alpha
+            # self.alpha_update_tol_u = 2. - self.alpha_update_tol
+            # if alpha_update_ratio < self.alpha_update_tol:
+            #     alpha_update = self.alpha_update_tol  * self.alpha
+            # if alpha_update_ratio > self.alpha_update_tol_u:
+            #     alpha_update = self.alpha_update_tol_u * self.alpha
+
+            # more logging and i22c specific updates
+            # self.alphas.append(alpha_update)
+            # self.alphas_tv.append(np.copy(self.alpha_tv))
+            # self.alpha = alpha_update
+            # lamXi = np.linalg.inv(self.sigXi)
+            # for c in self.cells:
+            #     c.sigXi = self.sigXi
+            #     c.lamXi = lamXi
 
     def check_alpha_converged(self):
         return False
