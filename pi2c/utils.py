@@ -252,8 +252,8 @@ class GMM(Distribution):
             x {np.array} -- observation to condition on
             idx {int} -- index array of the observation
         """
-        mu_var = self.mu[:, idx:]
-        mu_obs = self.mu[:, :idx]
+        mu_var = self.mu[:, idx:].copy()
+        mu_obs = self.mu[:, :idx].copy()
 
         gmm_obs = GMM(mu_obs, self.pi, self.var_scale)
         gmm_var = GMM(mu_var, self.pi, self.var_scale)

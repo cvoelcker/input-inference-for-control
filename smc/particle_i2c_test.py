@@ -35,12 +35,14 @@ def build_sys(n):
     return env
 
 def eval_controller(n, controller,system, cost):
+    costs = 0.
     x = system.init_env()
     for i in range(n):
-        print(x)
         u = controller.get_policy(x.flatten(), i).reshape(-1,1)
         x = system.forward(u)
-
+        costs += cost(x.flatten(), u)
+    return costs
+    
 
 if __name__ == "__main__":
     num_p = int(sys.argv[1])
@@ -53,42 +55,16 @@ if __name__ == "__main__":
     particle_graph = ParticleI2cGraph(
         sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 1., np.array([0., 0., 0.]), 10000., 1, u_samples, num_runs)
     
+    costs_over_run = []
+    alpha_over_run = []
     for i in range(100):
-        eval_controller(100, particle_graph, sys, cost)
+        costs = eval_controller(100, particle_graph, sys, cost)
+        costs_over_run.append(costs)
         sys.init_env()
-        alpha = 0.0001
-        alpha = particle_graph.run(alpha, False)
+        alpha = 1e-5
+        alpha_over_run.append(alpha)
+        alpha = particle_graph.run(alpha, False, 1)
         
         print('Updated graph {}'.format(i))
-        # # print(particle_graph.cells[0].back_particles)
 
-        # sys.init_env()
-        # costs = []
-        # traj_1 = []
-        # contr_1 = []
-        # costs_y = []
-        # traj_2 = []
-        # contr_2 = []
-        # x = sys.x0.copy()
-        # y = sys.x0.copy()
-        # for i in range(100):
-        #     u = particle_graph.get_policy(x.reshape(-1), i).reshape(-1, 1)
-        #     u0 = np.array([[0.]])
-        #     if np.isnan(u):
-        #         u = u0
-        #     contr_1.append(u)
-        #     traj_1.append(x)
-        #     contr_2.append(u0)
-        #     traj_2.append(y)
-        #     costs.append(cost(x.reshape(-1), u))
-        #     costs_y.append(cost(y.reshape(-1), u0))
-        #     x = sys.sample(x, u)
-        #     y = sys.sample(y, u0)
-        # print(np.mean(costs))
-        # print(np.mean(costs_y))
-        # np.save('test_results/cost_{}_{}.npy'.format(num_p, i), costs)
-        # np.save('test_results/costY_{}_{}.npy'.format(num_p, i), costs_y)
-        # np.save('test_results/contr1_{}_{}.npy'.format(num_p, i), contr_1)
-        # np.save('test_results/contr2_{}_{}.npy'.format(num_p, i), contr_2)
-        # np.save('test_results/traj1_{}_{}.npy'.format(num_p, i), traj_1)
-        # np.save('test_results/traj2_{}_{}.npy'.format(num_p, i), traj_2)
+    np.savetxt('results/cost_ia{}_np{}_nu{}_nr{}.npy'.format(alpha_over_run[-1], num_p, u_samples, num_runs), costs_over_run)

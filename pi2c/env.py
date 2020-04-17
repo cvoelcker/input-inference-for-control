@@ -114,10 +114,8 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         return self.x
 
     def forward(self, u):
-        Ax = self.A @ self.x
-        Bu = self.B @ u
-        dyn_x = Ax + Bu + self.a
-        x = self.A.dot(self.x) + self.B.dot(u) + self.a + np.random.randn(*self.x.shape) * self.sig_x_noise
+        x = self.A.dot(self.x) + self.B.dot(u) + self.a
+        x += np.random.randn(*x.shape) * self.sig_x_noise
         self.x = x.reshape(self.x.shape)
         return self.x
 
