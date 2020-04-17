@@ -1,1 +1,4 @@
 */__pycache__/
+
+# Exclude results files for cleaner git
+*.npy
