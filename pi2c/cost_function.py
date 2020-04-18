@@ -49,8 +49,8 @@ class StaticQRCost(QRCost):
         super().__init__(Q, R)
         self.xg = xg
         self.ug = ug
-        self.zg = np.concatenate([xg, ug])
-        self.dim = zg.size
+        self.zg = np.concatenate([xg, ug], 1)
+        self.dim = self.zg.size
         self.QR = np.zeros((self.dim, self.dim))
         self.QR[:xg.size,:xg.size] = Q
         self.QR[xg.size:,xg.size:] = R

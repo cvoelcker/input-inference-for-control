@@ -54,14 +54,15 @@ if __name__ == "__main__":
     
     particle_graph = ParticleI2cGraph(
         sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 1., np.array([0., 0., 0.]), 10000., 1, u_samples, num_runs)
-    
+    alpha = 1e-5
+
     costs_over_run = []
     alpha_over_run = []
     for i in range(100):
         costs = eval_controller(100, particle_graph, sys, cost)
+        print(costs)
         costs_over_run.append(costs)
         sys.init_env()
-        alpha = 1e-5
         alpha_over_run.append(alpha)
         alpha = particle_graph.run(alpha, False, 1)
         

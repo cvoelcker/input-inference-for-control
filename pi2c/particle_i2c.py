@@ -204,14 +204,14 @@ class ParticleI2cGraph():
         _iter = 0
         while True and _iter < max_iter:
             self._expectation(alpha, use_time_alpha)
-            next_alpha = self._maximization(alpha, use_time_alpha)
-            alpha = alpha + 0.1 * init_alpha
+            next_alpha, converged = self._maximization(alpha, use_time_alpha)
+            alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
             if use_time_alpha and self.check_alpha_converged():
                     break
-            elif np.isclose(alpha, next_alpha):
+            elif converged:
                 break
-            alpha = next_alpha
             _iter += 1
+        print(alpha)
         return alpha
 
     def _expectation(self, alpha, iteration, use_time_alpha=False):
@@ -275,10 +275,10 @@ class ParticleI2cGraph():
         print(ll/100.)
         print(v/100.)
         if self.UPDATE_ALPHA:
-            alpha = self._alpha_update()
-        return alpha
+            alpha, converged = self._alpha_update(alpha)
+        return alpha, converged
 
-    def _alpha_update(self):
+    def _alpha_update(self, alpha):
         # aka update alpha
         # also has a time-varying alpha idea that was bad (but exciting)
         # we should probably recheck that with the particle filter, since it might
@@ -291,7 +291,7 @@ class ParticleI2cGraph():
                     print("y_m is nan")
                     nan_traj = True
                 else:
-                    err = c.mu  - self.cost.zg
+                    err = c.xu_joint.mu[comp]  - self.cost.zg
                     s_covar_t = (err.dot(err.T) + c.xu_joint.sig[comp])
                     s_covar += c.xu_joint.pi[comp] * s_covar_t
 
@@ -301,7 +301,7 @@ class ParticleI2cGraph():
             s_covar = s_covar / float(self.T)
             s_covar = (s_covar + s_covar.T) / 2.0
 
-            alpha_update = np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y)
+            alpha_update = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
 
         # error logging
         if nan_traj:
@@ -322,8 +322,8 @@ class ParticleI2cGraph():
                 #     filename="bad_alpha")
                 raise ValueError("{} <= 0.0".format(alpha_update))
 
-            print(alpha_update)
-            return alpha_update
+            print('New alpha {}'.format(alpha_update))
+            return alpha_update, np.isclose(alpha, alpha_update)
 
 
             # get into update ratio reasoning later, might be crucial for particle
