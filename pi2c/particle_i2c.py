@@ -278,13 +278,13 @@ class ParticleI2cGraph():
             alpha, converged = self._alpha_update(alpha)
         return alpha, converged
 
-    def _alpha_update(self, alpha):
+    def _alpha_update(self, alpha, use_time_alpha=False):
         # aka update alpha
         # also has a time-varying alpha idea that was bad (but exciting)
         # we should probably recheck that with the particle filter, since it might
         # help with variance issues
         nan_traj = False
-        s_covar = np.zeros((self.sys.dim_y, self.sys.dim_y))
+        s_covar = np.zeros_like(self.sigXi0)
         for i, c in enumerate(self.cells):
             for comp in range(self.gmm_components):
                 if np.any(np.isnan(c.xu_joint.mu[comp])):
@@ -300,8 +300,11 @@ class ParticleI2cGraph():
                     # self.alpha_tv[i] = np.clip(tv, 0.5, 50)
             s_covar = s_covar / float(self.T)
             s_covar = (s_covar + s_covar.T) / 2.0
+            if use_time_alpha:
+                c.alpha = 1/np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
+                s_covar = np.zeros_like(s_covar)
 
-            alpha_update = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
+        alpha_update = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
 
         # error logging
         if nan_traj:
