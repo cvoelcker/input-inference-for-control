@@ -20,7 +20,7 @@ from pi2c.cost_function import Cost2Prob
 
 class ParticleI2cCell():
 
-    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0=100., gmm_components=4, u_samples=10):
+    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0, alpha_init, gmm_components=4, u_samples=10):
         """Initializes a particel swarm cell at a specific time index
         
         Arguments:
@@ -39,6 +39,7 @@ class ParticleI2cCell():
         self.back_particle = None
         self.num_p = num_p
         self.M = M
+        self.alpha = alpha_init
 
         self.particles = None
         self.weights = None
@@ -156,7 +157,7 @@ class ParticleI2cCell():
 
 class ParticleI2cGraph():
     
-    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, gmm_components=1, u_samples=100, num_runs=10):
+    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, alpha_init, gmm_components=1, u_samples=100, num_runs=10):
         """[summary]
         
         Arguments:
@@ -172,10 +173,11 @@ class ParticleI2cGraph():
         self.num_p = num_p
         self.M = M
         self.u_samples = u_samples
+        self.alpha = alpha_init
 
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, gmm_components, u_samples))
+            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, alpha_init, gmm_components, u_samples))
 
         self.gmm_components = gmm_components
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
@@ -197,13 +199,13 @@ class ParticleI2cGraph():
         self.sample_costs = self.cost(s_grid, a_grid)
 
     def run(self, init_alpha, use_time_alpha=False, max_iter=1000):
-        if use_time_alpha:
-            for c in self.cells:
-                c.alpha = init_alpha
+        # if use_time_alpha:
+        #     for c in self.cells:
+        #         c.alpha = init_alpha
         alpha = init_alpha
         _iter = 0
         while True and _iter < max_iter:
-            self._expectation(alpha, use_time_alpha)
+            self._expectation(alpha, _iter, use_time_alpha)
             next_alpha, converged = self._maximization(alpha, use_time_alpha)
             alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
             if use_time_alpha and self.check_alpha_converged():
@@ -211,7 +213,6 @@ class ParticleI2cGraph():
             elif converged:
                 break
             _iter += 1
-        print(alpha)
         return alpha
 
     def _expectation(self, alpha, iteration, use_time_alpha=False):
@@ -244,9 +245,11 @@ class ParticleI2cGraph():
                     num_seq_failed = 0
                     # initialize the backwards sample
                     # here, the particles need to be weighted according to the final thing
+                    # (actually, they don't really, since they where weighted in the final round of the forward
+                    # pass)
                     if self.M > self.num_p//self.u_samples:
                         self.M = self.num_p//self.u_samples
-                    backwards_samples = np.random.choice(np.arange(self.num_p//self.u_samples), self.M)
+                    backwards_samples = np.random.choice(np.arange(self.num_p//self.u_samples), self.M, replace=False)
                     particles = particles[backwards_samples]
                     
                     # run backwards smoothing via sampling
@@ -275,7 +278,7 @@ class ParticleI2cGraph():
         print(ll/100.)
         print(v/100.)
         if self.UPDATE_ALPHA:
-            alpha, converged = self._alpha_update(alpha)
+            alpha, converged = self._alpha_update(alpha, use_time_alpha)
         return alpha, converged
 
     def _alpha_update(self, alpha, use_time_alpha=False):
@@ -295,16 +298,22 @@ class ParticleI2cGraph():
                     s_covar_t = (err.dot(err.T) + c.xu_joint.sig[comp])
                     s_covar += c.xu_joint.pi[comp] * s_covar_t
 
+            if use_time_alpha:
+                s_covar = (s_covar + s_covar.T) / 2.0
+                c_alpha = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
+                c.alpha = np.clip(c_alpha, 0.66*c.alpha, 1.5*c.alpha)
+                s_covar = np.zeros_like(s_covar)
+
                     # logging, figure out later
                     # tv = np.trace(np.linalg.solve(self.sigXi0, s_covar_t)) / float(self.sys.dim_y)
                     # self.alpha_tv[i] = np.clip(tv, 0.5, 50)
-            s_covar = s_covar / float(self.T)
-            s_covar = (s_covar + s_covar.T) / 2.0
-            if use_time_alpha:
-                c.alpha = 1/np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
-                s_covar = np.zeros_like(s_covar)
+        s_covar = s_covar / float(self.T)
+        s_covar = (s_covar + s_covar.T) / 2.0
 
-        alpha_update = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
+        if use_time_alpha:
+            alpha_update = np.mean([c.alpha for c in self.cells])
+        else:
+            alpha_update = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
 
         # error logging
         if nan_traj:

@@ -34,14 +34,14 @@ def build_sys(n):
     env = make_env(exp)
     return env
 
-def eval_controller(n, controller,system, cost):
+def eval_controller(n, controller, system, cost):
     costs = 0.
     x = system.init_env()
     for i in range(n):
         u = controller.get_policy(x.flatten(), i).reshape(-1,1)
         x = system.forward(u)
         costs += cost(x.flatten(), u)
-    return costs
+    return costs/n
     
 
 if __name__ == "__main__":
@@ -52,19 +52,21 @@ if __name__ == "__main__":
     cost, prob = build_q()
     sys = build_sys(100)
     
-    particle_graph = ParticleI2cGraph(
-        sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 1., np.array([0., 0., 0.]), 10000., 1, u_samples, num_runs)
     alpha = 1e-5
+    particle_graph = ParticleI2cGraph(
+        sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 0.1, np.array([0., 0., 0.]), 10000., alpha, 1, u_samples, num_runs)
 
     costs_over_run = []
     alpha_over_run = []
+    sys.init_env()
+    alpha = particle_graph.run(alpha, False, 1)
     for i in range(100):
         costs = eval_controller(100, particle_graph, sys, cost)
         print(costs)
-        costs_over_run.append(costs)
+        # costs_over_run.append(costs)
         sys.init_env()
-        alpha_over_run.append(alpha)
-        alpha = particle_graph.run(alpha, False, 1)
+        # alpha_over_run.append(alpha)
+        particle_graph.run(alpha, False, 1)
         
         print('Updated graph {}'.format(i))
 
