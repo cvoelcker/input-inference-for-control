@@ -77,20 +77,20 @@ class ParticleI2cCell():
         #     new_u.append(u)
         # new_u = np.concatenate(new_u, 0)
         if use_time_alpha:
-            self.weights = self.obs_lik(particles, new_u, self.alpha)
+            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
         else:
-            self.weights = self.obs_lik(particles, new_u, alpha)
-        norm = np.sum(self.weights)
-        # if all particle weights are numerically impossible to compute
-        # the run is seen as failed
-        if norm == 0.:
-            failed = True
-        self.weights /= norm
-        samples = np.random.choice(
-            np.arange(self.num_p), 
-            size=self.num_p//self.u_samples, 
-            replace=True, 
-            p=self.weights)
+            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
+        # norm = np.sum(self.weights)
+        # # if all particle weights are numerically impossible to compute
+        # # the run is seen as failed
+        # if norm == 0.:
+        #     failed = True
+        # self.weights /= norm
+        # samples = np.random.choice(
+        #     np.arange(self.num_p), 
+        #     size=self.num_p//self.u_samples, 
+        #     replace=True, 
+        #     p=self.weights)
         self.particles = np.concatenate([particles, new_u], 1)[samples]
         new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
         return new_particles, failed

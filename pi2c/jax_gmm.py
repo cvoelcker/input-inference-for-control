@@ -165,7 +165,7 @@ class GMM:
     def _smoothed_avg(self, x0, x1, alpha):
         return (1-alpha) * x0 + alpha * x1
 
-    def update_parameters(x, alpha=1., max_iters=-1):
+    def update_parameters(self, x, alpha=1., max_iters=-1):
         converged = False
         iters = 0
         while not converged:

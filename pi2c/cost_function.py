@@ -73,6 +73,13 @@ class Cost2Prob():
 
     def likelihood(self, x, u, alpha=1., xg=None, ug=None):
         return np.exp(alpha * self.c.cost(x, u, xg, ug))
+
+    def log_sample(self, x, u, n, alpha=1., xg=None, ug=None):
+        costs = alpha * self.c.cost(x, u, xg, ug).reshape(-1,1) # unnormalized log probabilities
+        samples = np.random.gumbel(size=(x.shape[0],n))
+        log_gumbel = costs + samples
+        choices = np.argmax(log_gumbel, 0)
+        return choices, costs
     
     def __call__(self, x, u, alpha=1., xg=None, ug=None):
         return self.likelihood(x, u, alpha, xg, ug)
