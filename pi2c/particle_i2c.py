@@ -205,8 +205,8 @@ class ParticleI2cGraph():
         alpha = init_alpha
         _iter = 0
         while True and _iter < max_iter:
-            self._expectation(alpha, _iter, use_time_alpha)
-            next_alpha, converged = self._maximization(alpha, use_time_alpha)
+            self._expectation(init_alpha, _iter, use_time_alpha)
+            next_alpha, converged = self._maximization(init_alpha, use_time_alpha)
             alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
             if use_time_alpha and self.check_alpha_converged():
                     break

@@ -307,6 +307,9 @@ class GMM(Distribution):
         prob[np.isnan(prob)] = 1./self.num_components
         return prob.T
 
+    def smooth_avg(self, x0, x1, alpha=1.):
+        return (1-alpha) * x0 + alpha * x1
+
     def m_step(self, samples, membership):
         last_mu = self.mu.copy()
         last_var = self.var.copy()
@@ -321,9 +324,9 @@ class GMM(Distribution):
             (samples[j:j+1] - new_mu[i:i+1]).T.dot(samples[j:j+1] - new_mu[i:i+1])
             for i in range(self.num_components)] for j in range(samples.shape[0])])
         new_var = np.sum(membership.reshape(-1, self.num_components, 1, 1) * var_estimates, 0)/norm
-        self.mu = new_mu
+        self.mu = self.smooth_avg(self.mu, new_mu)
         self.pi = new_pi
-        self.var = new_var
+        self.var = self.smooth_avg(self.var, new_var)
         try:
             self.init_pdf()
         except np.linalg.linalg.LinAlgError as e:
@@ -334,7 +337,7 @@ class GMM(Distribution):
         converged = np.all(np.isclose(last_mu, new_mu))
         converged = converged and np.all(np.isclose(last_pi, new_pi))
         converged = converged and np.all(np.isclose(last_var, new_var))
-        return converged
+        return True
 
     def copy(self):
         return GMM(self.mu.copy(), self.pi.copy(), self.var_scale)
