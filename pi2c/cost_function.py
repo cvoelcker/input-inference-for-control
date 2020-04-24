@@ -58,9 +58,9 @@ class StaticQRCost(QRCost):
     def _cost(self, x, u, xg, ug):
         _x = x - xg
         _u = u - ug
-
-        Q_cost = np.diag((_x).dot(self.Q).dot(_x.T))
-        R_cost = np.diag((_u).dot(self.R).dot(_u.T))
+        
+        Q_cost = np.diag(_x @ self.Q @ _x.T)
+        R_cost = np.diag(_u @ self.R @ _u.T)
 
         return -(Q_cost + R_cost)
 

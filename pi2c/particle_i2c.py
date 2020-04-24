@@ -14,7 +14,8 @@ from abc import ABC, abstractmethod
 
 import cProfile
 
-from pi2c.utils import converged_list, finite_horizon_lqr, GaussianPrior, GMM
+from pi2c.utils import converged_list, finite_horizon_lqr, GaussianPrior
+from pi2c.jax_gmm import GMM
 from pi2c.cost_function import Cost2Prob
 
 
@@ -49,11 +50,7 @@ class ParticleI2cCell():
         self.back_weights = None
 
         # build broad EM prior
-        pi = np.array([1.] * gmm_components)/gmm_components
-        # add small tither to GMM components to aid convergence of first round
-        mu = np.tile(mu_u0.reshape(1, -1), (gmm_components, 1)) + \
-             np.random.randn(gmm_components, len(mu_u0)) * 1.
-        self.xu_joint = GMM(mu, pi, sig_u0)
+        self.xu_joint = GMM(self.dim_x + self.dim_u, gmm_components)
 
         self.u_samples = u_samples
 
@@ -71,12 +68,14 @@ class ParticleI2cCell():
 
     def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
         new_u = []
+        new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
         particles = np.repeat(particles, self.u_samples, 0)
-        for i in range(self.num_p//self.u_samples):
-            xu_joint = self.xu_joint.condition(particles[i], self.dim_x)
-            u = xu_joint.sample(self.u_samples).reshape(self.u_samples, -1)
-            new_u.append(u)
-        new_u = np.concatenate(new_u, 0)
+        # particles = np.repeat(particles, self.u_samples, 0)
+        # for i in range(self.num_p//self.u_samples):
+        #     xu_joint = self.xu_joint.condition(particles[i], self.dim_x)
+        #     u = xu_joint.sample(self.u_samples).reshape(self.u_samples, -1)
+        #     new_u.append(u)
+        # new_u = np.concatenate(new_u, 0)
         if use_time_alpha:
             self.weights = self.obs_lik(particles, new_u, self.alpha)
         else:
