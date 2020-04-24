@@ -40,7 +40,7 @@ def gmm_condition(params, x, idx):
     def var_mu(_var, _mv, _mo):
         v_corr = _var[idx:, :idx] @ np.linalg.inv(_var[:idx, :idx])
         _mu = _mv + v_corr @ (x - _mo)
-        _var_new = v_corr @ _var[:idx, idx:]
+        _var_new = _var[idx:, idx:] - v_corr @ _var[:idx, idx:]
         return _mu, _var_new
     new_mu, new_var = vmap(var_mu)(var, mu[:, idx:], mu[:, :idx])
     return reweight, new_mu, new_var
