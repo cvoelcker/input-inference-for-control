@@ -39,6 +39,7 @@ def gmm_condition(params, x, idx):
 
     def var_mu(_var, _mv, _mo):
         v_corr = _var[idx:, :idx] @ np.linalg.inv(_var[:idx, :idx])
+        print(v_corr)
         _mu = _mv + v_corr @ (x - _mo)
         _var_new = v_corr @ _var[:idx, idx:]
         return _mu, _var_new
@@ -123,6 +124,7 @@ class GMM:
         reps = x.shape[0]
         _idx_help = np.arange(n*reps)
         pi, mu, var = self.condition(x, idx)
+        var = np.maximum(var, 1e-5)
         sig = vmap(np.linalg.cholesky)(var)
 
         pi = np.repeat(pi, n, 0)
@@ -165,17 +167,19 @@ class GMM:
     def _smoothed_avg(self, x0, x1, alpha):
         return (1-alpha) * x0 + alpha * x1
 
-    def update_parameters(self, x, alpha=1., max_iters=-1):
+    def update_parameters(self, x, alpha=1., max_iters=3):
+        assert not np.any(np.isnan(x))
         converged = False
         iters = 0
         while not converged:
-            self.em_update(x, alpha)
+            converged = self.em_update(x, alpha)
             if iters == max_iters:
                 break
             if iters >= 0:
                 iters += 1
 
     def em_update(self, x, alpha=5e-2):
+        assert not np.any(np.isnan(x))
         weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
         weights = vmap(weight_func)(x)
         weights = (weights/np.sum(weights,1).reshape(-1,1))
@@ -184,7 +188,8 @@ class GMM:
         
         converged = np.all(np.isclose(self._pi, weights.sum(0)/weights.sum())) \
                 and np.all(np.isclose(self._mu, mu)) \
-                and np.all(np.isclose(self._var, var))
+                and np.all(np.isclose(self._var, n_cov))
+
         self._pi = self._smoothed_avg(self._pi, weights.sum(0)/weights.sum(), alpha)
         self._mu =  self._smoothed_avg(self._mu, mu, alpha)
         self._var = self._smoothed_avg(self._var, n_cov, alpha)
