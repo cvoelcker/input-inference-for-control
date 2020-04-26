@@ -21,7 +21,7 @@ from pi2c.cost_function import Cost2Prob
 
 class ParticleI2cCell():
 
-    def __init__(self, i, sys, cost, num_p, M, mu_u0, sig_u0, alpha_init, gmm_components=4, u_samples=10):
+    def __init__(self, i, sys, cost, num_p, M, alpha_init, gmm_components=4, u_samples=10):
         """Initializes a particel swarm cell at a specific time index
         
         Arguments:
@@ -43,7 +43,7 @@ class ParticleI2cCell():
         self.alpha = alpha_init
 
         self.particles = None
-        self.weights = None
+        self.log_weights = None
         self.new_particles = None
 
         self.back_particles = None
@@ -53,6 +53,16 @@ class ParticleI2cCell():
         self.xu_joint = GMM(self.dim_x + self.dim_u, gmm_components)
 
         self.u_samples = u_samples
+
+    def copy(self):
+        new_cell = ParticleI2cCell(self.i, self.sys, self.cost, self.num_p, self.M, self.mu_u0, self.sig_u0, self.alpha, self.gmm_components, self.u_samples)
+        new_cell.xu_joint = self.xu_joint.copy()
+        new_cell.particles = self.particles.copy()
+        new_cell.log_weights = self.log_weights.copy()
+        new_cell.new_particles = self.new_particles.copy()
+        new_cell.back_particles = self.back_particles.copy()
+        new_cell.back_weights = self.back_weights.copy()
+        return new_cell
 
     def particles_x(self):
         return self.back_particles[:, :self.dim_x]
@@ -85,7 +95,7 @@ class ParticleI2cCell():
         # # if all particle weights are numerically impossible to compute
         # # the run is seen as failed
         # if norm == 0.:
-        #     failed = True
+        #     failed = True)
         # self.weights /= norm
         # samples = np.random.choice(
         #     np.arange(self.num_p), 
@@ -94,8 +104,8 @@ class ParticleI2cCell():
         #     p=self.weights)
         self.particles = np.concatenate([particles, new_u], 1)[samples]
         assert not np.any(np.isnan(self.particles))
-        new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
-        return new_particles, failed
+        self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
+        return self.new_particles, failed
 
     def backward(self, particles):
         backwards = []
@@ -174,17 +184,24 @@ class ParticleI2cGraph():
         self.num_p = num_p
         self.M = M
         self.u_samples = u_samples
+        self.num_f_p = self.num_p//self.u_samples
         self.alpha = alpha_init
+
+        self.mu_x0 = mu_x0
+        self.mu_u0 = mu_u0
+        self.sig_x0 = sig_x0
+        self.sig_u0 = sig_u0
 
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, mu_u0, sig_u0, alpha_init, gmm_components, u_samples))
+            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, gmm_components, u_samples))
 
         self.gmm_components = gmm_components
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
         self.num_runs = num_runs
         
         # borrowed from the quadratic cost assumption
+        # invalid for other costs
         self.sigXi0 = np.linalg.inv(self.cost.QR)
 
         self.UPDATE_ALPHA = True
@@ -224,46 +241,54 @@ class ParticleI2cGraph():
             alpha {float} -- the current alpha optimization parameter
         """
         all_samples = []
+        all_f_samples = []
         failed_counter = 0
         i = self.num_runs
         num_seq_failed = 0
         with tqdm(total=self.num_runs) as pbar:
             while i > 0:
                 run_samples = []
+                run_f_samples = []
                 # sample initial x from the systems inital distribution
                 particles = self.x0_dist.sample(self.num_p//self.u_samples)
                 
                 failed = False
                 # run per cell loop
                 for c in self.cells:
-                    n_particles, failed = c.forward(particles, iteration, failed, alpha, use_time_alpha)
+                    particles, failed = c.forward(particles, iteration, failed, alpha, use_time_alpha)
+                    run_f_samples.append(particles.copy())
                     # check if all particle trajectories have a numeric probability of 0
                     if failed:
                         num_seq_failed += 1
                         break
-                    particles = n_particles
                 if not failed:
                     num_seq_failed = 0
                     # initialize the backwards sample
                     # here, the particles need to be weighted according to the final thing
                     # (actually, they don't really, since they where weighted in the final round of the forward
-                    # pass)
+                    # pass), we went one step "too far"
+                    # due to no reweigh, I'm aslo sampling without replacing
                     if self.M > self.num_p//self.u_samples:
                         self.M = self.num_p//self.u_samples
-                    backwards_samples = np.random.choice(np.arange(self.num_p//self.u_samples), self.M, replace=False)
+                    backwards_samples = np.random.choice(
+                        np.arange(self.num_p//self.u_samples), 
+                        self.M, 
+                        replace=False)
                     particles = particles[backwards_samples]
                     
                     # run backwards smoothing via sampling
                     for c in list(reversed(self.cells)):
                         particles = c.backward(particles)
-                        run_samples.append(particles)
+                        run_samples.append(particles.copy())
                     all_samples.append(run_samples)
+                    all_f_samples.append(run_f_samples)
                     i -= 1
                     pbar.update(1)
-        all_samples = np.concatenate(all_samples, 1)
+        self.all_samples = np.concatenate(all_samples, 1)
+        self.all_f_samples = np.concatenate(all_f_samples, 1)
 
         for i, c in enumerate(list(reversed(self.cells))):
-            c.back_particles = all_samples[i]
+            c.back_particles = self.all_samples[i]
         
     def _maximization(self, alpha, use_time_alpha=False):
         ## JOINT UPDATE
@@ -364,3 +389,71 @@ class ParticleI2cGraph():
 
     def get_policy(self, x, i):
         return self.cells[i].policy(x)
+
+    def copy(self):
+        new_graph = ParticleI2cGraph(self.sys, self.cost, self.T, self.num_p, self.M, self.mu_x0, self.sig_x0, self.mu_u0, self.sig_u0, self.alpha_init, self.gmm_components, self.u_samples, self.num_runs)
+        for i, c in enumerate(self.cells):
+            new_graph.cells[i] = c.copy()
+        return new_graph
+
+
+class ParticlePlotter():
+
+    def __init__(self, particle_i2c):
+        self.graph = particle_i2c
+
+    def build_plot(self, title_pre, fig_name=None):
+
+    def plot_particle_forward_backwards_cells(self, dim, fig=None):
+        """This plots the (subsamled) forward and backward particle clouds
+        for a given dimension with mean and sigma shaded.
+
+        Arguments:
+            dim {int} -- dimension to compute particles over
+
+        Keyword Arguments:
+            fig {plt} -- if fig is given, figure will be used and returned
+            otherwise, cloud is printed directly to screen (default: {None})
+        """
+        if fig is None:
+            # initialize new figure
+            pass
+
+        time_x_loc_f = np.repeat(np.arange(self.graph.T), self.graph.num_f_p)
+        time_x_loc_b = np.repeat(np.arange(self.graph.T), self.graph.M)
+        f_particles = self.all_f_samples[:, :, dim]
+        b_particles = self.all_samples[:, :, dim]
+
+        mean_f_p = f_particles.mean(0)
+        mean_b_p = b_particles.mean(0)
+        sig_f_p = f_particles.std(0)
+        sig_b_p = b_particles.std(0)
+        sig_upper_f = mean_f_p + sig_f_p
+        sig_lower_f = mean_f_p - sig_f_p
+        sig_upper_b = mean_b_p + sig_b_p
+        sig_lower_b = mean_b_p - sig_b_p
+
+        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f)
+        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b)
+        fig.plot(mean_f_p)
+        fig.plot(mean_b_p)
+        fig.scatter(time_x_loc_f, f_particles)
+        fig.scatter(time_x_loc_b, b_particles)
+
+        return fig
+
+    def plot_joint_forward_backward_cells(self, dim, fig_name=None):
+        pass
+
+    def plot_controler(self, eval_env, repeats=1000, random_starts=True, fig_name=None):
+        pass
+
+    def plot_all(self, run_name):
+        plt.clf()
+        plt.figure()
+        plt.subplot(111)
+        self.plot_particle_forward_backwards_cells(1, plt)
+        plt.title(run_name + ': Dimension 1 plot of forward and backward samples')
+        plt.x_label('Timestep')
+        plt.y_label('x1')
+        plt.savefig('test.png')
