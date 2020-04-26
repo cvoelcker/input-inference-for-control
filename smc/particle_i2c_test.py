@@ -52,21 +52,22 @@ if __name__ == "__main__":
     cost, prob = build_q()
     sys = build_sys(100)
     
-    alpha = 1e-4
+    alpha = 1e-5
     particle_graph = ParticleI2cGraph(
         sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 0.1, np.array([0., 0., 0.]), 10000., alpha, 1, u_samples, num_runs)
 
     costs_over_run = []
     alpha_over_run = []
     sys.init_env()
-    alpha = particle_graph.run(alpha, False, 1)
-    for i in range(2):
+    alpha = particle_graph.run(alpha, False, 5)
+    for i in range(100):
         costs = eval_controller(100, particle_graph, sys, cost)
         print(costs)
         # costs_over_run.append(costs)
         sys.init_env()
         # alpha_over_run.append(alpha)
-        alpha = np.clip(particle_graph.run(alpha, False, 3), 0.66*alpha, np.minimum(1.5*alpha, 1e-4))
+        # alpha = np.clip(particle_graph.run(alpha, False, 1), 0.66*alpha, 1.5*alpha)
+        alpha = particle_graph.run(alpha, False, 1)
         
         print('Updated graph {}, new alpha {}'.format(i, alpha))
 

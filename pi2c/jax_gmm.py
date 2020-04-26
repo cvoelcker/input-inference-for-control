@@ -39,7 +39,6 @@ def gmm_condition(params, x, idx):
 
     def var_mu(_var, _mv, _mo):
         v_corr = _var[idx:, :idx] @ np.linalg.inv(_var[:idx, :idx])
-        print(v_corr)
         _mu = _mv + v_corr @ (x - _mo)
         _var_new = _var[idx:, idx:] - v_corr @ _var[:idx, idx:]
         return _mu, _var_new
@@ -142,8 +141,12 @@ class GMM:
         return samples
 
     def conditional_mean(self, x, idx):
+        x = x.reshape(-1, idx)
         pi, mu, var = self.condition(x, idx)
-        return np.sum(pi * mu, 1)
+        if not np.isclose(np.sum(pi), 1.):
+            pi = self._pi
+        weighted_mean = np.sum(pi * mu, 1)
+        return weighted_mean
 
     def gradient_update(self, x, alpha=1e-2):
         weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)

@@ -69,6 +69,7 @@ class ParticleI2cCell():
     def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
         new_u = []
         new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
+        assert not np.any(np.isnan(new_u)), new_u
         particles = np.repeat(particles, self.u_samples, 0)
         # particles = np.repeat(particles, self.u_samples, 0)
         # for i in range(self.num_p//self.u_samples):
@@ -92,6 +93,7 @@ class ParticleI2cCell():
         #     replace=True, 
         #     p=self.weights)
         self.particles = np.concatenate([particles, new_u], 1)[samples]
+        assert not np.any(np.isnan(self.particles))
         new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
         return new_particles, failed
 
@@ -205,14 +207,14 @@ class ParticleI2cGraph():
         _iter = 0
         while True and _iter < max_iter:
             self._expectation(init_alpha, _iter, use_time_alpha)
-            next_alpha, converged = self._maximization(init_alpha, use_time_alpha)
-            alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
+            next_alpha, converged = self._maximization(alpha, use_time_alpha)
+            # alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
             if use_time_alpha and self.check_alpha_converged():
                     break
             elif converged:
                 break
             _iter += 1
-        return alpha
+        return next_alpha
 
     def _expectation(self, alpha, iteration, use_time_alpha=False):
         """Runs the forward, backward smoothing algorithm to estimate the
@@ -289,18 +291,19 @@ class ParticleI2cGraph():
         s_covar = np.zeros_like(self.sigXi0)
         for i, c in enumerate(self.cells):
             for comp in range(self.gmm_components):
-                if np.any(np.isnan(c.xu_joint.mu[comp])):
+                if np.any(np.isnan(c.xu_joint._mu[comp])):
                     print("y_m is nan")
                     nan_traj = True
                 else:
-                    err = c.xu_joint.mu[comp]  - self.cost.zg
-                    s_covar_t = (err.dot(err.T) + c.xu_joint.sig[comp])
-                    s_covar += c.xu_joint.pi[comp] * s_covar_t
+                    err = c.xu_joint._mu[comp]  - self.cost.zg
+                    s_covar_t = (err.dot(err.T) + c.xu_joint._sig[comp])
+                    s_covar += c.xu_joint._pi[comp] * s_covar_t
 
             if use_time_alpha:
                 s_covar = (s_covar + s_covar.T) / 2.0
                 c_alpha = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
-                c.alpha = np.clip(c_alpha, 0.66*c.alpha, 1.5*c.alpha)
+                #c.alpha = np.clip(c_alpha, 0.66*c.alpha, 1.5*c.alpha)
+                c.alpha = c_alpha
                 s_covar = np.zeros_like(s_covar)
 
                     # logging, figure out later
