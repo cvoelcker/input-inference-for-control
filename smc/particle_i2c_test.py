@@ -6,7 +6,7 @@ from code import interact
 from pi2c.env import make_env
 from pi2c.model import make_env_model
 from pi2c.cost_function import QRCost, StaticQRCost, Cost2Prob
-from pi2c.particle_i2c import ParticleI2cGraph
+from pi2c.particle_i2c import ParticleI2cGraph, ParticlePlotter
 
 import matplotlib.pyplot as plt
 
@@ -55,12 +55,12 @@ if __name__ == "__main__":
     alpha = 1e-5
     particle_graph = ParticleI2cGraph(
         sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 0.1, np.array([0., 0., 0.]), 10000., alpha, 1, u_samples, num_runs)
-    plotter = ParticleI2cPlotter(particle_graph)
+    plotter = ParticlePlotter(particle_graph)
 
     costs_over_run = []
     alpha_over_run = []
     sys.init_env()
-    alpha = particle_graph.run(alpha, False, 5)
+    alpha = particle_graph.run(alpha, False, 1)
     for i in range(100):
         costs = eval_controller(100, particle_graph, sys, cost)
         print(costs)
@@ -69,7 +69,7 @@ if __name__ == "__main__":
         # alpha_over_run.append(alpha)
         # alpha = np.clip(particle_graph.run(alpha, False, 1), 0.66*alpha, 1.5*alpha)
         alpha = particle_graph.run(alpha, False, 1)
-        plotter.plot_all('Round ' + i)
+        plotter.plot_all('Round ' + str(i))
         
         print('Updated graph {}, new alpha {}'.format(i, alpha))
 

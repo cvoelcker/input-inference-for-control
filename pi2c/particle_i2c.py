@@ -403,6 +403,7 @@ class ParticlePlotter():
         self.graph = particle_i2c
 
     def build_plot(self, title_pre, fig_name=None):
+        pass
 
     def plot_particle_forward_backwards_cells(self, dim, fig=None):
         """This plots the (subsamled) forward and backward particle clouds
@@ -419,26 +420,27 @@ class ParticlePlotter():
             # initialize new figure
             pass
 
-        time_x_loc_f = np.repeat(np.arange(self.graph.T), self.graph.num_f_p)
-        time_x_loc_b = np.repeat(np.arange(self.graph.T), self.graph.M)
-        f_particles = self.all_f_samples[:, :, dim]
-        b_particles = self.all_samples[:, :, dim]
+        f_particles = self.graph.all_f_samples[:, :, dim]
+        b_particles = np.flip(self.graph.all_samples[:, :, dim], 0)
+        
+        time_x_loc_f = np.repeat(np.arange(self.graph.T), f_particles.shape[1])
+        time_x_loc_b = np.repeat(np.arange(self.graph.T), b_particles.shape[1])
 
-        mean_f_p = f_particles.mean(0)
-        mean_b_p = b_particles.mean(0)
-        sig_f_p = f_particles.std(0)
-        sig_b_p = b_particles.std(0)
+        mean_f_p = f_particles.mean(1)
+        mean_b_p = b_particles.mean(1)
+        sig_f_p = f_particles.std(1)
+        sig_b_p = b_particles.std(1)
         sig_upper_f = mean_f_p + sig_f_p
         sig_lower_f = mean_f_p - sig_f_p
         sig_upper_b = mean_b_p + sig_b_p
         sig_lower_b = mean_b_p - sig_b_p
 
-        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f)
-        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b)
-        fig.plot(mean_f_p)
-        fig.plot(mean_b_p)
-        fig.scatter(time_x_loc_f, f_particles)
-        fig.scatter(time_x_loc_b, b_particles)
+        plt.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f)
+        plt.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b)
+        plt.plot(mean_f_p)
+        plt.plot(mean_b_p)
+        plt.scatter(time_x_loc_f, f_particles.flatten(), 0.01)
+        plt.scatter(time_x_loc_b, b_particles.flatten(), 0.01)
 
         return fig
 
@@ -450,10 +452,10 @@ class ParticlePlotter():
 
     def plot_all(self, run_name):
         plt.clf()
-        plt.figure()
-        plt.subplot(111)
-        self.plot_particle_forward_backwards_cells(1, plt)
+        # plt.figure()
+        # plt.subplot(111)
+        self.plot_particle_forward_backwards_cells(1, None)
         plt.title(run_name + ': Dimension 1 plot of forward and backward samples')
-        plt.x_label('Timestep')
-        plt.y_label('x1')
+        plt.xlabel('Timestep')
+        plt.ylabel('x1')
         plt.savefig('test.png')

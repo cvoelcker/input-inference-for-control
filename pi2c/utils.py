@@ -160,7 +160,7 @@ def configure_plots():
         matplotlib.rcParams['text.latex.unicode'] = True
 
 
-class GaussianPrior(Distribution):
+class GaussianPrior():
 
     def __init__(self, mu, sigma):
         self.mu = mu
