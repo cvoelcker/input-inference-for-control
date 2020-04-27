@@ -2,4 +2,5 @@
 
 # Exclude results files for cleaner git
 *.png
+*.pdf
 *.npy
