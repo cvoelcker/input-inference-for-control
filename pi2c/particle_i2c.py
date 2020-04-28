@@ -441,13 +441,13 @@ class ParticlePlotter():
             # TODO: Howto get prior after update? Rework code
             pass
         
-        mean_f_p, sig_f_p, sig_upper_f, sig_lower_f = get_mean_sig_bounds(f_particles, 1, 2)
-        mean_f_b, sig_f_b, sig_upper_b, sig_lower_b = get_mean_sig_bounds(b_particles, 1, 2)
+        mean_f, sig_f, sig_upper_f, sig_lower_f = get_mean_sig_bounds(f_particles, 1, 2)
+        mean_b, sig_b, sig_upper_b, sig_lower_b = get_mean_sig_bounds(b_particles, 1, 2)
 
-        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C1')
-        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C2')
-        fig.plot(mean_f_p, color='C1')
-        fig.plot(mean_b_p, color='C2')
+        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C1', alpha=.1)
+        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C2', alpha=.1)
+        fig.plot(mean_f, color='C1')
+        fig.plot(mean_b, color='C2')
         fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01, color='C1')
         fig.scatter(time_x_loc_b, b_particles.flatten(), 0.01, color='C2')
 
@@ -478,6 +478,8 @@ class ParticlePlotter():
     def plot_controler(self, eval_env, cost, repeats=1000, random_starts=True, fig=None):
         if fig is None:
             fig, ax = plt.subplots(2)
+        else:
+            ax = fig
 
         plt_help_x = np.arange(self.graph.T)
         costs, us = self.eval_controler(eval_env, cost, repeats=repeats, random_starts=random_starts)
@@ -512,12 +514,12 @@ class ParticlePlotter():
         self.plot_particle_forward_backwards_cells(0, fig=axs[0])
         self.plot_particle_forward_backwards_cells(1, fig=axs[1])
         self.plot_particle_forward_backwards_cells(2, 'u',fig=axs[2])
-        fig.tight_layout()
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for suptitle
         fig.savefig('plots/particles_{}.png'.format(run_name))
-
-        fig, axs = self.plot_controler(eval_env, cost, repeats, random_starts)
+        fig, axs = plt.subplots(2)
         fig.suptitle('Particle I2C controler evaluation ' + run_name)
-        fig.tight_layout()
+        self.plot_controler(eval_env, cost, repeats, random_starts, fig=axs)
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for uptitle
         fig.savefig('plots/controler_{}.png'.format(run_name))
 
 
