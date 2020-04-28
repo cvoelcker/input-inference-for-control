@@ -206,6 +206,10 @@ class ParticleI2cGraph():
 
         self.UPDATE_ALPHA = True
 
+    @property
+    def is_multimodal(self):
+        return self.gmm_components > 1
+
     def init_costs(self):
         """Get an MC estimate of the current cost function integral (currently not used)
         """
@@ -432,14 +436,13 @@ class ParticlePlotter():
         time_x_loc_f = np.repeat(np.arange(self.graph.T), f_particles.shape[1])
         time_x_loc_b = np.repeat(np.arange(self.graph.T), b_particles.shape[1])
 
-        mean_f_p = f_particles.mean(1)
-        mean_b_p = b_particles.mean(1)
-        sig_f_p = f_particles.std(1)
-        sig_b_p = b_particles.std(1)
-        sig_upper_f = mean_f_p + sig_f_p
-        sig_lower_f = mean_f_p - sig_f_p
-        sig_upper_b = mean_b_p + sig_b_p
-        sig_lower_b = mean_b_p - sig_b_p
+        if self.graph.is_multimodal:
+            # TODO: Fix multimodal plotting to be nicer (via the gaussian comp sig)
+            # TODO: Howto get prior after update? Rework code
+            pass
+        
+        mean_f_p, sig_f_p, sig_upper_f, sig_lower_f = get_mean_sig_bounds(f_particles, 1, 2)
+        mean_f_b, sig_f_b, sig_upper_b, sig_lower_b = get_mean_sig_bounds(b_particles, 1, 2)
 
         fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f)
         fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b)
@@ -470,10 +473,6 @@ class ParticlePlotter():
                 costs.append(cost(x.flatten(), u))
         costs = np.array(costs).reshape(repeats, -1)
         us = np.array(us).reshape(repeats, -1)
-        print(costs.shape)
-        print(np.any(np.isnan(costs)))
-        print(us.shape)
-        print(np.any(np.isnan(us)))
         return costs, us
 
     def plot_controler(self, eval_env, cost, repeats=1000, random_starts=True, fig=None):
@@ -483,13 +482,8 @@ class ParticlePlotter():
         plt_help_x = np.arange(self.graph.T)
         costs, us = self.eval_controler(eval_env, cost, repeats=repeats, random_starts=random_starts)
         
-        mean_c, sig_c, sig_upper_c, sig_lower_c = get_mean_sig_bounds(costs, 0)
-        mean_u, sig_u, sig_upper_u, sig_lower_u = get_mean_sig_bounds(us, 0)
-        print(mean_c.shape)
-        print(sig_c.shape)
-        print(sig_upper_c.shape)
-        print(sig_lower_c.shape)
-
+        mean_c, sig_c, sig_upper_c, sig_lower_c = get_mean_sig_bounds(costs, 0, 2)
+        mean_u, sig_u, sig_upper_u, sig_lower_u = get_mean_sig_bounds(us, 0, 2)
         # plot costs
         ax[0].fill_between(plt_help_x, sig_lower_c, sig_upper_c, color='b', alpha=0.1)
         for i in range(repeats):
@@ -513,18 +507,19 @@ class ParticlePlotter():
 
     def plot_all(self, run_name, eval_env, cost, repeats=10, random_starts=True):
         plt.clf()
-        # plt.figure()
-        # plt.subplot(111)
         fig, axs = plt.subplots(3)
         fig.suptitle('Particle I2C training ' + run_name)
         self.plot_particle_forward_backwards_cells(0, fig=axs[0])
         self.plot_particle_forward_backwards_cells(1, fig=axs[1])
         self.plot_particle_forward_backwards_cells(2, 'u',fig=axs[2])
+        fig.tight_layout()
         fig.savefig('plots/particles_{}.png'.format(run_name))
 
         fig, axs = self.plot_controler(eval_env, cost, repeats, random_starts)
         fig.suptitle('Particle I2C controler evaluation ' + run_name)
+        fig.tight_layout()
         fig.savefig('plots/controler_{}.png'.format(run_name))
+
 
 def get_mean_sig_bounds(arr, dim, sig_multiple=1.):
     mean_arr = arr.mean(dim)
