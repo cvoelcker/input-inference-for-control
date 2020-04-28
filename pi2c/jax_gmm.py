@@ -145,7 +145,7 @@ class GMM:
         pi, mu, var = self.condition(x, idx)
         if not np.isclose(np.sum(pi), 1.):
             pi = self._pi
-        weighted_mean = np.sum(pi * mu, 1)
+        weighted_mean = np.sum(pi * mu.reshape(x.shape[0], -1), 1)
         return weighted_mean
 
     def gradient_update(self, x, alpha=1e-2):

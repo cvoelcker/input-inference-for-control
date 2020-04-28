@@ -105,7 +105,7 @@ class ParticleI2cCell():
         self.particles = np.concatenate([particles, new_u], 1)[samples]
         assert not np.any(np.isnan(self.particles))
         self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
-        return self.new_particles, failed
+        return self.new_particles, self.particles, failed
 
     def backward(self, particles):
         backwards = []
@@ -251,12 +251,18 @@ class ParticleI2cGraph():
                 run_f_samples = []
                 # sample initial x from the systems inital distribution
                 particles = self.x0_dist.sample(self.num_p//self.u_samples)
+
+                neg = np.random.choice(
+                        np.arange(len(particles)),
+                        len(particles)//2,
+                        replace=False)
+                particles[neg] = -particles[neg]
                 
                 failed = False
                 # run per cell loop
                 for c in self.cells:
-                    particles, failed = c.forward(particles, iteration, failed, alpha, use_time_alpha)
-                    run_f_samples.append(particles.copy())
+                    particles, sampled, failed = c.forward(particles, iteration, failed, alpha, use_time_alpha)
+                    run_f_samples.append(sampled.copy())
                     # check if all particle trajectories have a numeric probability of 0
                     if failed:
                         num_seq_failed += 1
@@ -405,7 +411,7 @@ class ParticlePlotter():
     def build_plot(self, title_pre, fig_name=None):
         pass
 
-    def plot_particle_forward_backwards_cells(self, dim, fig=None):
+    def plot_particle_forward_backwards_cells(self, dim, dim_name='x', fig=None):
         """This plots the (subsamled) forward and backward particle clouds
         for a given dimension with mean and sigma shaded.
 
@@ -418,7 +424,7 @@ class ParticlePlotter():
         """
         if fig is None:
             # initialize new figure
-            pass
+            fig, axs = plt.subplots(1)
 
         f_particles = self.graph.all_f_samples[:, :, dim]
         b_particles = np.flip(self.graph.all_samples[:, :, dim], 0)
@@ -435,27 +441,94 @@ class ParticlePlotter():
         sig_upper_b = mean_b_p + sig_b_p
         sig_lower_b = mean_b_p - sig_b_p
 
-        plt.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f)
-        plt.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b)
-        plt.plot(mean_f_p)
-        plt.plot(mean_b_p)
-        plt.scatter(time_x_loc_f, f_particles.flatten(), 0.01)
-        plt.scatter(time_x_loc_b, b_particles.flatten(), 0.01)
+        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f)
+        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b)
+        fig.plot(mean_f_p)
+        fig.plot(mean_b_p)
+        fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01)
+        fig.scatter(time_x_loc_b, b_particles.flatten(), 0.01)
 
+        fig.set_xlabel('Timestep')
+        fig.set_ylabel(dim_name + str(dim))
+        fig.set_title('Forward/backward particles over ' + dim_name + str(dim))
+        
         return fig
 
     def plot_joint_forward_backward_cells(self, dim, fig_name=None):
         pass
 
-    def plot_controler(self, eval_env, repeats=1000, random_starts=True, fig_name=None):
-        pass
+    def eval_controler(self, eval_env, cost, repeats=1000, random_starts=True):
+        costs = []
+        us = []
+        x = eval_env.init_env(randomized=random_starts)
+        print('Evaluating envs for plotting')
+        for i in tqdm(range(repeats)):
+            for i in range(self.graph.T):
+                u = self.graph.get_policy(x.flatten(), i).reshape(-1,1)
+                us.append(u)
+                x = eval_env.forward(u)
+                costs.append(cost(x.flatten(), u))
+        costs = np.array(costs).reshape(repeats, -1)
+        us = np.array(us).reshape(repeats, -1)
+        print(costs.shape)
+        print(np.any(np.isnan(costs)))
+        print(us.shape)
+        print(np.any(np.isnan(us)))
+        return costs, us
 
-    def plot_all(self, run_name):
+    def plot_controler(self, eval_env, cost, repeats=1000, random_starts=True, fig=None):
+        if fig is None:
+            fig, ax = plt.subplots(2)
+
+        plt_help_x = np.arange(self.graph.T)
+        costs, us = self.eval_controler(eval_env, cost, repeats=repeats, random_starts=random_starts)
+        
+        mean_c, sig_c, sig_upper_c, sig_lower_c = get_mean_sig_bounds(costs, 0)
+        mean_u, sig_u, sig_upper_u, sig_lower_u = get_mean_sig_bounds(us, 0)
+        print(mean_c.shape)
+        print(sig_c.shape)
+        print(sig_upper_c.shape)
+        print(sig_lower_c.shape)
+
+        # plot costs
+        ax[0].fill_between(plt_help_x, sig_lower_c, sig_upper_c, color='b', alpha=0.1)
+        for i in range(repeats):
+            ax[0].plot(costs[i], 'b--', lw=0.5)
+        ax[0].plot(mean_c, 'b')
+        ax[0].set_xlabel('T')
+        ax[0].set_ylabel('cost')
+        ax[0].set_title('Per timestep cost of several controler evaluations')
+
+        # plot controls
+        ax[1].fill_between(plt_help_x, sig_lower_u, sig_upper_u, color='r', alpha=0.1)
+        for i in range(repeats):
+            ax[1].plot(us[i], 'r--', lw=0.5)
+        ax[1].plot(mean_u, 'r')
+        ax[1].set_xlabel('T')
+        ax[1].set_ylabel('u')
+        ax[1].set_title('Per timestep control signal of several controler evaluations')
+
+        return fig, ax
+
+
+    def plot_all(self, run_name, eval_env, cost, repeats=10, random_starts=True):
         plt.clf()
         # plt.figure()
         # plt.subplot(111)
-        self.plot_particle_forward_backwards_cells(1, None)
-        plt.title(run_name + ': Dimension 1 plot of forward and backward samples')
-        plt.xlabel('Timestep')
-        plt.ylabel('x1')
-        plt.savefig('test.png')
+        fig, axs = plt.subplots(3)
+        fig.suptitle('Particle I2C training ' + run_name)
+        self.plot_particle_forward_backwards_cells(0, fig=axs[0])
+        self.plot_particle_forward_backwards_cells(1, fig=axs[1])
+        self.plot_particle_forward_backwards_cells(2, 'u',fig=axs[2])
+        fig.savefig('plots/particles_{}.png'.format(run_name))
+
+        fig, axs = self.plot_controler(eval_env, cost, repeats, random_starts)
+        fig.suptitle('Particle I2C controler evaluation ' + run_name)
+        fig.savefig('plots/controler_{}.png'.format(run_name))
+
+def get_mean_sig_bounds(arr, dim, sig_multiple=1.):
+    mean_arr = arr.mean(dim)
+    sig_arr = arr.std(dim)
+    sig_upper_arr = mean_arr + sig_arr * sig_multiple
+    sig_lower_arr = mean_arr - sig_arr * sig_multiple
+    return mean_arr, sig_arr, sig_upper_arr, sig_lower_arr

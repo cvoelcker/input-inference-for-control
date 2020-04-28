@@ -109,8 +109,10 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         self.sig_x_noise = 0.1
         self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
 
-    def init_env(self):
+    def init_env(self, randomized=False):
         self.x = np.copy(self.x0)
+        if randomized:
+            self.x += np.random.randn(*self.x.shape) * self.sig_x_noise
         return self.x
 
     def forward(self, u):
