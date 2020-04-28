@@ -444,12 +444,12 @@ class ParticlePlotter():
         mean_f_p, sig_f_p, sig_upper_f, sig_lower_f = get_mean_sig_bounds(f_particles, 1, 2)
         mean_f_b, sig_f_b, sig_upper_b, sig_lower_b = get_mean_sig_bounds(b_particles, 1, 2)
 
-        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f)
-        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b)
-        fig.plot(mean_f_p)
-        fig.plot(mean_b_p)
-        fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01)
-        fig.scatter(time_x_loc_b, b_particles.flatten(), 0.01)
+        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C1')
+        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C2')
+        fig.plot(mean_f_p, color='C1')
+        fig.plot(mean_b_p, color='C2')
+        fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01, color='C1')
+        fig.scatter(time_x_loc_b, b_particles.flatten(), 0.01, color='C2')
 
         fig.set_xlabel('Timestep')
         fig.set_ylabel(dim_name + str(dim))
