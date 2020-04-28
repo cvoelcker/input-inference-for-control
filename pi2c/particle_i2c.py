@@ -444,12 +444,12 @@ class ParticlePlotter():
         mean_f, sig_f, sig_upper_f, sig_lower_f = get_mean_sig_bounds(f_particles, 1, 2)
         mean_b, sig_b, sig_upper_b, sig_lower_b = get_mean_sig_bounds(b_particles, 1, 2)
 
-        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C1', alpha=.1)
-        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C2', alpha=.1)
-        fig.plot(mean_f, color='C1')
-        fig.plot(mean_b, color='C2')
-        fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01, color='C1')
-        fig.scatter(time_x_loc_b, b_particles.flatten(), 0.01, color='C2')
+        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C0', alpha=.1)
+        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C1', alpha=.1)
+        fig.plot(mean_f, color='C0')
+        fig.plot(mean_b, color='C1')
+        fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01, color='C0')
+        fig.scatter(time_x_loc_b, b_particles.flatten(), 0.01, color='C1')
 
         fig.set_xlabel('Timestep')
         fig.set_ylabel(dim_name + str(dim))
@@ -487,19 +487,19 @@ class ParticlePlotter():
         mean_c, sig_c, sig_upper_c, sig_lower_c = get_mean_sig_bounds(costs, 0, 2)
         mean_u, sig_u, sig_upper_u, sig_lower_u = get_mean_sig_bounds(us, 0, 2)
         # plot costs
-        ax[0].fill_between(plt_help_x, sig_lower_c, sig_upper_c, color='b', alpha=0.1)
+        ax[0].fill_between(plt_help_x, sig_lower_c, sig_upper_c, color='C0', alpha=0.1)
         for i in range(repeats):
-            ax[0].plot(costs[i], 'b--', lw=0.5)
-        ax[0].plot(mean_c, 'b')
+            ax[0].plot(costs[i], '--', color='C0' lw=0.5)
+        ax[0].plot(mean_c, 'C0')
         ax[0].set_xlabel('T')
         ax[0].set_ylabel('cost')
         ax[0].set_title('Per timestep cost of several controler evaluations')
 
         # plot controls
-        ax[1].fill_between(plt_help_x, sig_lower_u, sig_upper_u, color='r', alpha=0.1)
+        ax[1].fill_between(plt_help_x, sig_lower_u, sig_upper_u, color='C1', alpha=0.1)
         for i in range(repeats):
-            ax[1].plot(us[i], 'r--', lw=0.5)
-        ax[1].plot(mean_u, 'r')
+            ax[1].plot(us[i], '--', color='C1', lw=0.5)
+        ax[1].plot(mean_u, 'C1')
         ax[1].set_xlabel('T')
         ax[1].set_ylabel('u')
         ax[1].set_title('Per timestep control signal of several controler evaluations')
