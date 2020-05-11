@@ -489,7 +489,7 @@ class ParticlePlotter():
         # plot costs
         ax[0].fill_between(plt_help_x, sig_lower_c, sig_upper_c, color='C0', alpha=0.1)
         for i in range(repeats):
-            ax[0].plot(costs[i], '--', color='C0' lw=0.5)
+            ax[0].plot(costs[i], '--', color='C0', lw=0.5)
         ax[0].plot(mean_c, 'C0')
         ax[0].set_xlabel('T')
         ax[0].set_ylabel('cost')
