@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
-import numpy as np
+# import numpy as np
+import jax.numpy as np
 from scipy.optimize import minimize, brentq
 from scipy.special import logsumexp
 from copy import deepcopy
@@ -85,7 +86,8 @@ class ParticleI2cCell():
             samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
         else:
             samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
-        self.particles = np.concatenate([particles, new_u], 1)[samples]
+        self.forward_samples = samples
+        self.particles = np.concatenate([particles, new_u], 1)
         assert not np.any(np.isnan(self.particles))
         self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
         return self.new_particles, self.particles, failed
@@ -111,6 +113,9 @@ class ParticleI2cCell():
             backwards.append(self.particles[samples].reshape(-1))
             # save smoothing weights
             smoothing_weights.append(particle_likelihood)
+
+        self.backwards_samples = samples
+        self.log_weights_back = self.log_weights[all_samples]
         self.back_particles = np.array(backwards)
         self.back_weights = np.array(smoothing_weights)
         return np.array(self.back_particles)
