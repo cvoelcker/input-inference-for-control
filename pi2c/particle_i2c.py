@@ -33,7 +33,7 @@ class ParticleI2cCell():
             num_p {int} -- number of particles
             M {int} -- number of backward trajectories for smoothing
         """
-        self.key = PRNGKey(random_seed)
+        self.key = random.PRNGKey(random_seed)
 
         self.i = i
         self.sys = sys
@@ -169,7 +169,7 @@ class ParticleI2cGraph():
             num_p {[type]} -- [description]
             M {[type]} -- [description]
         """
-        self.key = PRNGKey(random_seed)
+        self.key = random.PRNGKey(random_seed)
         self.sys = sys
         self.cost = cost
         self.T = T
