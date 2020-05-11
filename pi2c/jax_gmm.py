@@ -18,6 +18,17 @@ def gaussian_pdf(mu, var, x):
     return norm * np.exp((-1/2) * (x - mu).T @ np.linalg.inv(var) @ (x - mu))
 
 
+# @jit
+def log_normal_pdf(mu, var, x):
+    dim = mu.size
+    x = x.reshape(1,-1)
+    norm = np.log(((2 * np.pi) ** (-dim/2)) * (np.linalg.det(var) ** (-1/2)))
+    return norm + (-1/2) * (x - mu) @ np.linalg.inv(var) @ (x - mu).T
+
+
+vec_log_normal_pdf = vmap(jit(log_normal_pdf), in_axes=(None, None, 0), out_axes=0)
+
+
 @jit
 def gmm(params, x):
     pi = params[0]
@@ -90,7 +101,7 @@ class GMM:
 
     def __init__(self, dim, n_components, sig0=10000., key=0):
         self._key = random.PRNGKey(key)
-        self._pi = np.ones(dim) / dim
+        self._pi = np.ones(n_components) / n_components
         self._mu = random.normal(self._key, (n_components, dim)) * 3.
         self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * sig0
         self._sig = vmap(np.linalg.cholesky)(self._var)
@@ -192,12 +203,16 @@ class GMM:
 
     def em_update(self, x, alpha=5e-2):
         assert not np.any(np.isnan(x))
+        # print(self._pi)
+        # print(self._mu)
+        # print(self._var)
+        # print(x.shape)
         weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
         weights = vmap(weight_func)(x)
+        # print(weights.shape)
         weights = (weights/np.sum(weights,1).reshape(-1,1))
         mu = np.stack([empirical_mu(x, weights[:,i].reshape(-1,1)) for i in range(self.n_components)], 0)
         n_cov = np.stack([empirical_cov(x, mu[i].reshape(1,-1), weights[:,i]) for i in range(self.n_components)], 0)
-        
         converged = np.all(np.isclose(self._pi, weights.sum(0)/weights.sum())) \
                 and np.all(np.isclose(self._mu, mu)) \
                 and np.all(np.isclose(self._var, n_cov))

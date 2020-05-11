@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 # import numpy as np
 import jax.numpy as np
+import numpy as onp
 from jax import random, jit, vmap, grad
 from scipy.optimize import minimize, brentq
 from scipy.special import logsumexp
@@ -80,6 +81,7 @@ class ParticleI2cCell():
     def backward_done(self):
         return self.back_particles is not None
 
+    #@jit
     def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
         new_u = []
         new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
@@ -94,30 +96,39 @@ class ParticleI2cCell():
         assert not np.any(np.isnan(self.particles))
         self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
         return self.new_particles, self.particles, failed
-
+    
+    #@jit
     def backward(self, particles):
         backwards = []
         smoothing_weights = []
         all_samples = []
-        for p in particles:
+        dim_x = self.dim_x
+        f_particles = self.particles[:, :dim_x].T
+        f_u_particles = self.particles[:, dim_x:].T
+        num_p = self.num_p
+        def get_particle_likelihood(p):
             p = p[:self.dim_x].reshape(-1, 1)
-            particle_likelihood = self.sys.likelihood(
-                self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p)
-            particle_log_likelihood = np.log(particle_likelihood)
+            particle_log_likelihood = self.sys.log_likelihood(f_particles, f_u_particles, p)
+            # particle_log_likelihood = np.log(particle_likelihood)
             # renormalize
             # particle_likelihood /= np.sum(particle_likelihood)
             # sample likely ancestor
-            samples = random.categorical(
-                    self.key,
-                    particle_log_likelihood,
-                    shape = (1,))
-            all_samples.append(samples)
-            # save backwards sample
-            backwards.append(self.particles[samples].reshape(-1))
-            # save smoothing weights
-            smoothing_weights.append(particle_likelihood)
+            # sample = random.categorical(
+            #         self.key,
+            #         particle_log_likelihood,
+            #         shape = (1,))
+            max_sample = random.gumbel(self.key, (num_p,))
+            sample = np.argmax(particle_log_likelihood.flatten() + max_sample)
+            return particle_log_likelihood.flatten()[sample], sample
+            
+        vectorized = vmap(get_particle_likelihood)
+        smoothing_weights, all_samples = vectorized(particles)
+        
+        backwards = self.particles[all_samples]
+        # print(all_samples)
+        # save smoothing weights
 
-        self.backwards_samples = samples
+        self.backwards_samples = all_samples
         self.log_weights_back = self.log_weights[all_samples]
         self.back_particles = np.array(backwards)
         self.back_weights = np.array(smoothing_weights)
@@ -259,6 +270,7 @@ class ParticleI2cGraph():
                     run_f_samples.append(sampled.copy())
                     # check if all particle trajectories have a numeric probability of 0
                     if failed:
+                        print(failed)
                         num_seq_failed += 1
                         break
                 if not failed:
@@ -277,8 +289,8 @@ class ParticleI2cGraph():
                     for c in list(reversed(self.cells)):
                         particles = c.backward(particles)
                         run_samples.append(particles.copy())
-                    all_samples.append(run_samples)
-                    all_f_samples.append(run_f_samples)
+                    all_samples.append(np.array(run_samples))
+                    all_f_samples.append(np.array(run_f_samples))
                     i -= 1
                     pbar.update(1)
         self.all_samples = np.concatenate(all_samples, 1)
@@ -286,6 +298,7 @@ class ParticleI2cGraph():
 
         for i, c in enumerate(list(reversed(self.cells))):
             c.back_particles = self.all_samples[i]
+            # print(c.back_particles.shape)
         
     def _maximization(self, alpha, use_time_alpha=False):
         ## JOINT UPDATE

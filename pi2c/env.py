@@ -7,6 +7,7 @@ import scipy as sc
 import os
 
 import pi2c.env_def as env_def
+import pi2c.jax_gmm as jax_gmm
 
 
 class BaseSim(object):
@@ -107,7 +108,7 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         self.duration = duration
         self.a = self.a.reshape((-1, 1)) # give me strength...
         self.sig_x_noise = 0.1
-        self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
+        self.noise_pdf = jax_gmm.vec_log_normal_pdf
 
     def init_env(self, randomized=False):
         self.x = np.copy(self.x0)
@@ -121,10 +122,10 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         self.x = x.reshape(self.x.shape)
         return self.x
 
-    def likelihood(self, x0, u, x1):
+    def log_likelihood(self, x0, u, x1):
         _x = self.A.dot(x0) + self.B.dot(u) + self.a
         _x -= x1
-        return self.noise_pdf.pdf(_x.T)
+        return self.noise_pdf(np.zeros((1,self.dim_x)), np.eye(self.dim_x) * self.sig_x_noise, _x.T)
 
 class PendulumKnown(env_def.PendulumKnown, BaseSim):
 
