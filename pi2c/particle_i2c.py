@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 # import numpy as np
 import jax.numpy as np
+from jax import random, jit, vmap, grad
 from scipy.optimize import minimize, brentq
 from scipy.special import logsumexp
 from copy import deepcopy
@@ -22,7 +23,7 @@ from pi2c.cost_function import Cost2Prob
 
 class ParticleI2cCell():
 
-    def __init__(self, i, sys, cost, num_p, M, alpha_init, gmm_components=4, u_samples=10):
+    def __init__(self, i, sys, cost, num_p, M, alpha_init, gmm_components=4, u_samples=10, random_seed=1):
         """Initializes a particel swarm cell at a specific time index
         
         Arguments:
@@ -32,6 +33,8 @@ class ParticleI2cCell():
             num_p {int} -- number of particles
             M {int} -- number of backward trajectories for smoothing
         """
+        self.key = PRNGKey(random_seed)
+
         self.i = i
         self.sys = sys
         self.dim_u = sys.dim_u
@@ -100,14 +103,14 @@ class ParticleI2cCell():
             p = p[:self.dim_x].reshape(-1, 1)
             particle_likelihood = self.sys.likelihood(
                 self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p)
+            particle_log_likelihood = np.log(particle_likelihood)
             # renormalize
-            particle_likelihood /= np.sum(particle_likelihood)
+            # particle_likelihood /= np.sum(particle_likelihood)
             # sample likely ancestor
-            samples = np.random.choice(
-                np.arange(self.num_p//self.u_samples), 
-                size=1, 
-                replace=True, 
-                p=particle_likelihood)
+            samples = random.categorical(
+                    self.key,
+                    particle_log_likelihood,
+                    shape = (1,))
             all_samples.append(samples)
             # save backwards sample
             backwards.append(self.particles[samples].reshape(-1))
@@ -156,7 +159,7 @@ class ParticleI2cCell():
 
 class ParticleI2cGraph():
     
-    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, alpha_init, gmm_components=1, u_samples=100, num_runs=10):
+    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, alpha_init, gmm_components=1, u_samples=100, num_runs=10, random_seed=1):
         """[summary]
         
         Arguments:
@@ -166,6 +169,7 @@ class ParticleI2cGraph():
             num_p {[type]} -- [description]
             M {[type]} -- [description]
         """
+        self.key = PRNGKey(random_seed)
         self.sys = sys
         self.cost = cost
         self.T = T
@@ -182,7 +186,7 @@ class ParticleI2cGraph():
 
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, gmm_components, u_samples))
+            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, gmm_components, u_samples, random_seed))
 
         self.gmm_components = gmm_components
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
@@ -243,11 +247,9 @@ class ParticleI2cGraph():
                 run_f_samples = []
                 # sample initial x from the systems inital distribution
                 particles = self.x0_dist.sample(self.num_p//self.u_samples)
+                
+                neg = random.randint(self.key, (len(particles)//2,), 0, len(particles))
 
-                neg = np.random.choice(
-                        np.arange(len(particles)),
-                        len(particles)//2,
-                        replace=False)
                 particles[neg] = -particles[neg]
                 
                 failed = False
@@ -268,10 +270,7 @@ class ParticleI2cGraph():
                     # due to no reweigh, I'm aslo sampling without replacing
                     if self.M > self.num_p//self.u_samples:
                         self.M = self.num_p//self.u_samples
-                    backwards_samples = np.random.choice(
-                        np.arange(self.num_p//self.u_samples), 
-                        self.M, 
-                        replace=False)
+                    backwards_samples = random.randint(self.key, (self.M,), 0, self.num_p//self.u_samples)
                     particles = particles[backwards_samples]
                     
                     # run backwards smoothing via sampling
