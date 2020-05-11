@@ -81,27 +81,10 @@ class ParticleI2cCell():
         new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
         assert not np.any(np.isnan(new_u)), new_u
         particles = np.repeat(particles, self.u_samples, 0)
-        # particles = np.repeat(particles, self.u_samples, 0)
-        # for i in range(self.num_p//self.u_samples):
-        #     xu_joint = self.xu_joint.condition(particles[i], self.dim_x)
-        #     u = xu_joint.sample(self.u_samples).reshape(self.u_samples, -1)
-        #     new_u.append(u)
-        # new_u = np.concatenate(new_u, 0)
         if use_time_alpha:
             samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
         else:
             samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
-        # norm = np.sum(self.weights)
-        # # if all particle weights are numerically impossible to compute
-        # # the run is seen as failed
-        # if norm == 0.:
-        #     failed = True)
-        # self.weights /= norm
-        # samples = np.random.choice(
-        #     np.arange(self.num_p), 
-        #     size=self.num_p//self.u_samples, 
-        #     replace=True, 
-        #     p=self.weights)
         self.particles = np.concatenate([particles, new_u], 1)[samples]
         assert not np.any(np.isnan(self.particles))
         self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
@@ -366,34 +349,11 @@ class ParticleI2cGraph():
                 print(np.linalg.det(s_covar))
                 print(np.linalg.eig(s_covar))
                 print(self.sigXi0)
-                # self.plot_traj(
-                #     -1, dir_name=self.res_dir,
-                #     filename="bad_alpha")
                 raise ValueError("{} <= 0.0".format(alpha_update))
 
             print('New alpha {}'.format(alpha_update))
             return alpha_update, np.isclose(alpha, alpha_update)
-
-
-            # get into update ratio reasoning later, might be crucial for particle
-            # variance reasons, especially in the early steps
-
-            # alpha_update_ratio = alpha_update / self.alpha
-            # self.alpha_update_tol_u = 2. - self.alpha_update_tol
-            # if alpha_update_ratio < self.alpha_update_tol:
-            #     alpha_update = self.alpha_update_tol  * self.alpha
-            # if alpha_update_ratio > self.alpha_update_tol_u:
-            #     alpha_update = self.alpha_update_tol_u * self.alpha
-
-            # more logging and i22c specific updates
-            # self.alphas.append(alpha_update)
-            # self.alphas_tv.append(np.copy(self.alpha_tv))
-            # self.alpha = alpha_update
-            # lamXi = np.linalg.inv(self.sigXi)
-            # for c in self.cells:
-            #     c.sigXi = self.sigXi
-            #     c.lamXi = lamXi
-
+    
     def check_alpha_converged(self):
         return False
 
@@ -401,7 +361,12 @@ class ParticleI2cGraph():
         return self.cells[i].policy(x)
 
     def copy(self):
-        new_graph = ParticleI2cGraph(self.sys, self.cost, self.T, self.num_p, self.M, self.mu_x0, self.sig_x0, self.mu_u0, self.sig_u0, self.alpha_init, self.gmm_components, self.u_samples, self.num_runs)
+        new_graph = ParticleI2cGraph(self.sys, 
+                self.cost, self.T, self.num_p, 
+                self.M, self.mu_x0, self.sig_x0, 
+                self.mu_u0, self.sig_u0, self.alpha_init, 
+                self.gmm_components, self.u_samples, 
+                self.num_runs)
         for i, c in enumerate(self.cells):
             new_graph.cells[i] = c.copy()
         return new_graph

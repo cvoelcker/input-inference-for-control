@@ -26,6 +26,15 @@ def gmm(params, x):
     return np.sum(pi * vmap(gaussian_pdf, in_axes=(0,0,None))(mu, var, x))
 
 
+@jit
+def gmm_softmax_pi(params, x):
+    pi = params[0]
+    pi = np.exp(pi)/np.sum(np.exp(pi))
+    mu = params[1]
+    var = params[2]
+    return gmm((pi, mu, var), x)
+
+
 def gmm_condition(params, x, idx):
     pi = params[0]
     mu = params[1]
@@ -81,7 +90,7 @@ class GMM:
 
     def __init__(self, dim, n_components, sig0=10000., key=0):
         self._key = random.PRNGKey(key)
-        self._pi = random.normal(self._key, (n_components, )) / 10.
+        self._pi = np.ones(dim) / dim
         self._mu = random.normal(self._key, (n_components, dim)) * 3.
         self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * sig0
         self._sig = vmap(np.linalg.cholesky)(self._var)
@@ -154,7 +163,7 @@ class GMM:
         weights = (weights/np.sum(weights,1).reshape(-1,1))
         #n_cov = np.stack([empirical_cov(x, self._mu[i].reshape(1,-1), weights[:,i]) for i in range(self.n_components)], 0)
         
-        ll = lambda _p, _x: np.log(vmap(gmm, in_axes=(None,0), out_axes=0)(_p, _x))
+        ll = lambda _p, _x: np.log(vmap(gmm_softmax_pi, in_axes=(None,0), out_axes=0)(_p, _x))
         value, grads = mean_grad(ll, self.params, x)
         grad_pi = grads[0]
         grad_mu = grads[1]
