@@ -6,12 +6,12 @@ from jax import grad, jit, vmap, value_and_grad, random
 import matplotlib.pyplot as plt
 
 
-@jit
+# @jit
 def softmax(vec):
     return np.exp(vec)/np.sum(np.exp(vec))
 
 
-@jit
+# @jit
 def gaussian_pdf(mu, var, x):
     dim = mu.size
     norm = ((2 * np.pi) ** (-dim/2)) * (np.linalg.det(var) ** (-1/2)) 
@@ -26,10 +26,10 @@ def log_normal_pdf(mu, var, x):
     return norm + (-1/2) * (x - mu) @ np.linalg.inv(var) @ (x - mu).T
 
 
-vec_log_normal_pdf = jit(vmap(jit(log_normal_pdf), in_axes=(None, None, 0), out_axes=0))
+vec_log_normal_pdf = vmap(log_normal_pdf, in_axes=(None, None, 0), out_axes=0)
 
 
-@jit
+# @jit
 def gmm(params, x):
     pi = params[0]
     mu = params[1]
@@ -37,7 +37,7 @@ def gmm(params, x):
     return np.sum(pi * vmap(gaussian_pdf, in_axes=(0,0,None))(mu, var, x))
 
 
-@jit
+# @jit
 def gmm_softmax_pi(params, x):
     pi = params[0]
     pi = np.exp(pi)/np.sum(np.exp(pi))
@@ -78,7 +78,7 @@ def weighted_mean_grad(f, p, x, weights):
     return value_and_grad(mean_f)(p, x)
 
 
-@jit
+# @jit
 def empirical_cov(x, mu, weights=None):
     def cov_i(_x):
         _x = _x.reshape(1,-1)
@@ -89,7 +89,7 @@ def empirical_cov(x, mu, weights=None):
         return np.sum(vmap(cov_i)(x) * weights.reshape(-1,1,1),0)/np.sum(weights)
 
 
-@jit
+# @jit
 def empirical_mu(x, weights=None):
     if weights is None:
         return np.mean(x,0)

@@ -83,8 +83,7 @@ class Cost2Prob():
         self.c = cost
         self.key = random.PRNGKey(0)
 
-        self.log_sample = lambda x, u, alpha: jit(_log_sample, static_argnums=(3,4,5,6,7))\
-                (x, u, alpha, n_samples, n_x, self.c.Q, self.c.R, self.key)
+        self.log_sample = lambda x, u, alpha: _log_sample(x, u, alpha, n_samples, n_x, self.c.Q, self.c.R, self.key)
 
 
     def likelihood(self, x, u, alpha=1., xg=None, ug=None):
