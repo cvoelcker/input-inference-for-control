@@ -78,7 +78,8 @@ class ParticleI2cCell():
 
     def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
         new_u = []
-        new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
+        # new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
+        new_u = np.zeros((self.num_p, 1))
         assert not np.any(np.isnan(new_u)), new_u
         particles = np.repeat(particles, self.u_samples, 0)
         if use_time_alpha:

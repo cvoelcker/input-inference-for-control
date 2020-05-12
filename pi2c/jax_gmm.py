@@ -90,7 +90,7 @@ class GMM:
 
     def __init__(self, dim, n_components, sig0=10000., key=0):
         self._key = random.PRNGKey(key)
-        self._pi = np.ones(dim) / dim
+        self._pi = np.ones(n_components) / n_components
         self._mu = random.normal(self._key, (n_components, dim)) * 3.
         self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * sig0
         self._sig = vmap(np.linalg.cholesky)(self._var)
