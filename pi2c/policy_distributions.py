@@ -3,6 +3,11 @@ from tqdm import tqdm
 import jax.numpy as np
 import numpy
 from jax import grad, jit, vmap, value_and_grad, random
+
+from jax.experimental import stax
+from jax.experimental.stax import (BatchNorm, Conv, Dense, Flatten,
+                                           Relu, LogSoftmax)
+
 import matplotlib.pyplot as plt
 
 
@@ -207,6 +212,40 @@ class GMM:
         self._var = self._smoothed_avg(self._var, n_cov, alpha)
         
         return converged
+
+class MLP:
+
+    def __init__(self, dim_input, dim_output, batch_size, key):
+        self.init_fun, self.net = stax.serial(
+                Dense(10), Relu, Dense(10), Relu)
+        self.init_mean_head, self.mean_net = stax.serial(
+                Dense(10), Relu, Dense(dim_output))
+        self.init_var_head, self.var_net = stax.serial(
+                Dense(10), Relu, Dense(dim_output))
+        _, self.net_params = self.init_fun(key, (batch_size, dim_input))
+        _, self.mean_params = self.init_mean_head(key, (batch_size, 10))
+        _, self.var_params = self.init_var_head(key, (batch_size, 10))
+        
+    @property
+    def params(self):
+        return (self.net_params, self.mean_params, self.var_params)
+
+    def conditional_sample(self, x):
+        def network(params, x):
+            y = self.net(params[0], x)
+            mu = self.mean_net(params[1], y)
+            var = self.mean_net(params[2], y)
+            return mu, var
+
+        return network(self.params, x)
+
+    def conditional_mean():
+        pass
+
+    def update():
+        pass
+
+    
 
 if __name__ == "__main__":
 
