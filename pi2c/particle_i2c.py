@@ -3,7 +3,7 @@ from matplotlib.patches import Ellipse
 # import numpy as np
 import jax.numpy as np
 import numpy as onp
-from jax import random, jit, vmap, grad
+from jax import random, jit, vmap, grad, ops
 from scipy.optimize import minimize, brentq
 from scipy.special import logsumexp
 from copy import deepcopy
@@ -41,7 +41,7 @@ class ParticleI2cCell():
         self.dim_u = sys.dim_u
         self.dim_x = sys.dim_x
         self.cost = cost
-        self.obs_lik = Cost2Prob(self.cost)
+        self.obs_lik = Cost2Prob(self.cost, num_p, num_p//u_samples)
         self.back_particle = None
         self.num_p = num_p
         self.M = M
@@ -84,17 +84,18 @@ class ParticleI2cCell():
     #@jit
     def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
         new_u = []
-        new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
+        # new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
+        new_u = np.zeros((self.num_p, 1))
         assert not np.any(np.isnan(new_u)), new_u
         particles = np.repeat(particles, self.u_samples, 0)
         if use_time_alpha:
-            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
+            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.alpha)
         else:
-            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
+            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, alpha)
         self.forward_samples = samples
         self.particles = np.concatenate([particles, new_u], 1)
         assert not np.any(np.isnan(self.particles))
-        self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
+        self.new_particles = self.sys.simulate(np.take(particles,samples,0).T, np.take(new_u, samples,0).T).T
         return self.new_particles, self.particles, failed
     
     #@jit
@@ -129,7 +130,7 @@ class ParticleI2cCell():
         # save smoothing weights
 
         self.backwards_samples = all_samples
-        self.log_weights_back = self.log_weights[all_samples]
+        self.log_weights_back = np.take(self.log_weights, all_samples, 0)
         self.back_particles = np.array(backwards)
         self.back_weights = np.array(smoothing_weights)
         return np.array(self.back_particles)
@@ -185,7 +186,7 @@ class ParticleI2cGraph():
         self.cost = cost
         self.T = T
         self.num_p = num_p
-        self.M = M
+        self.M = min(M, num_p//u_samples)
         self.u_samples = u_samples
         self.num_f_p = self.num_p//self.u_samples
         self.alpha = alpha_init
@@ -260,9 +261,8 @@ class ParticleI2cGraph():
                 particles = self.x0_dist.sample(self.num_p//self.u_samples)
                 
                 neg = random.randint(self.key, (len(particles)//2,), 0, len(particles))
+                particles = ops.index_update(particles, neg, np.take(-particles, neg, 0))
 
-                particles[neg] = -particles[neg]
-                
                 failed = False
                 # run per cell loop
                 for c in self.cells:
@@ -270,7 +270,6 @@ class ParticleI2cGraph():
                     run_f_samples.append(sampled.copy())
                     # check if all particle trajectories have a numeric probability of 0
                     if failed:
-                        print(failed)
                         num_seq_failed += 1
                         break
                 if not failed:
@@ -283,7 +282,7 @@ class ParticleI2cGraph():
                     if self.M > self.num_p//self.u_samples:
                         self.M = self.num_p//self.u_samples
                     backwards_samples = random.randint(self.key, (self.M,), 0, self.num_p//self.u_samples)
-                    particles = particles[backwards_samples]
+                    particles = np.take(particles, backwards_samples, axis=0)
                     
                     # run backwards smoothing via sampling
                     for c in list(reversed(self.cells)):

@@ -26,7 +26,7 @@ def log_normal_pdf(mu, var, x):
     return norm + (-1/2) * (x - mu) @ np.linalg.inv(var) @ (x - mu).T
 
 
-vec_log_normal_pdf = vmap(jit(log_normal_pdf), in_axes=(None, None, 0), out_axes=0)
+vec_log_normal_pdf = jit(vmap(jit(log_normal_pdf), in_axes=(None, None, 0), out_axes=0))
 
 
 @jit
@@ -56,7 +56,7 @@ def gmm_condition(params, x, idx):
     weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(mu[:, :idx], var[:, :idx, :idx], _x)
     # reweight = vmap(weight_func)(x)
     reweight = weight_func(x)
-
+    
     def var_mu(_var, _mv, _mo):
         v_corr = _var[idx:, :idx] @ np.linalg.inv(_var[:idx, :idx])
         _mu = _mv + v_corr @ (x - _mo)

@@ -1,4 +1,5 @@
-import numpy as np
+import jax.numpy as np
+from jax import random, jit
 from abc import ABC, abstractmethod
 
 class EnvCostFunction(ABC):
@@ -51,9 +52,11 @@ class StaticQRCost(QRCost):
         self.ug = ug
         self.zg = np.concatenate([xg, ug], 1)
         self.dim = self.zg.size
-        self.QR = np.zeros((self.dim, self.dim))
-        self.QR[:xg.size,:xg.size] = Q
-        self.QR[xg.size:,xg.size:] = R
+
+        # construct QR
+        _Qupper = np.concatenate([Q, np.zeros((Q.shape[0], R.shape[0]))], axis=1)
+        _Rlower = np.concatenate([np.zeros((R.shape[0], Q.shape[0])), R], axis=1)
+        self.QR = np.concatenate([_Qupper, _Rlower], axis=0)
 
     def _cost(self, x, u, xg, ug):
         _x = x - xg
@@ -65,21 +68,27 @@ class StaticQRCost(QRCost):
         return -(Q_cost + R_cost)
 
 
+def _log_sample(x, u, alpha, n, xn, Q, R, key):
+    costs = -alpha * (np.diag(x @ Q @ x.T) + np.diag(u @ R @ u.T))
+    samples = random.gumbel(key, (xn, n))
+    log_gumble = np.expand_dims(costs,1) + samples
+    choices = np.argmax(log_gumble, 0)
+    return choices, costs
+
+
 class Cost2Prob():
-    def __init__(self, cost):
+    def __init__(self, cost, n_x, n_samples):
         self.normalized = cost.normalized
         self.constant_goal = cost.constant_goal
         self.c = cost
+        self.key = random.PRNGKey(0)
+
+        self.log_sample = lambda x, u, alpha: jit(_log_sample, static_argnums=(3,4,5,6,7))\
+                (x, u, alpha, n_samples, n_x, self.c.Q, self.c.R, self.key)
+
 
     def likelihood(self, x, u, alpha=1., xg=None, ug=None):
         return np.exp(alpha * self.c.cost(x, u, xg, ug))
 
-    def log_sample(self, x, u, n, alpha=1., xg=None, ug=None):
-        costs = alpha * self.c.cost(x, u, xg, ug).reshape(-1,1) # unnormalized log probabilities
-        samples = np.random.gumbel(size=(x.shape[0],n))
-        log_gumbel = costs + samples
-        choices = np.argmax(log_gumbel, 0)
-        return choices, costs
-    
     def __call__(self, x, u, alpha=1., xg=None, ug=None):
         return self.likelihood(x, u, alpha, xg, ug)

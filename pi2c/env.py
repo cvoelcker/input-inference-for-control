@@ -9,6 +9,9 @@ import os
 import pi2c.env_def as env_def
 import pi2c.jax_gmm as jax_gmm
 
+import jax.numpy as jnp
+from jax import random, jit
+
 
 class BaseSim(object):
 
@@ -102,6 +105,7 @@ class LinearSim(env_def.LinearDef, BaseSim):
         self.x = x.reshape(self.x.shape)
         return self.x
 
+
 class LinearDisturbed(env_def.LinearDef, BaseSim):
 
     def __init__(self, duration):
@@ -110,11 +114,30 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         self.sig_x_noise = 0.1
         self.noise_pdf = jax_gmm.vec_log_normal_pdf
 
+        self.key = random.PRNGKey(0)
+        
+        # self.simulate = lambda x, u: jit(_linear, static_argnums=(2,3,4,6,7))(x, u, self.A, self.B, self.sig_x_noise, self.key, self.dim_x)
+        # self.log_likelihood = lambda x0, u, x1: jit(_linear_gaussian_likelihood, static_argnums=())()
+
     def init_env(self, randomized=False):
         self.x = np.copy(self.x0)
         if randomized:
             self.x += np.random.randn(*self.x.shape) * self.sig_x_noise
         return self.x
+
+    def simulate(self, x, u):
+        r = random.normal(self.key, x.shape)
+        def _linear(x, u, _self):
+            return _self.A @ x + _self.B @ u + r * _self.sig_x_noise
+        return jit(_linear, static_argnums=2)(x, u, self)
+
+    def log_likelihood(self, x1, u, x2):
+        var = np.eye(self.dim_x)
+        mu = np.zeros(self.dim_x)
+        def _forward_lik(_x1, _u, _x2, _self):
+            _x =  _self.A @ _x + _self.B @ u - _x1
+            return jax_gmm.vec_log_normal_pdf(mu, var, _x)
+        return jit(_forward_lik, static_argnums=3)(x1, u, x2, self)
 
     def forward(self, u):
         x = self.A.dot(self.x) + self.B.dot(u) + self.a

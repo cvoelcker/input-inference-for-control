@@ -17,13 +17,13 @@ class Experiment:
     N_DURATION: int = None
 
 
-def build_q():
+def build_q(u_samples):
     Q = np.eye(2) * 10.
     R = np.eye(1) * 1.
     x = np.array([[0., 0.]])
     u = np.array([[0.]])
     cost = StaticQRCost(Q, R, x, u)
-    prob = Cost2Prob(cost)
+    prob = Cost2Prob(cost, 10, u_samples)
     return cost, prob
 
 
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     u_samples = int(sys.argv[2])
     num_runs = int(sys.argv[3])
     print('Hello')
-    cost, prob = build_q()
+    cost, prob = build_q(u_samples)
     sys = build_sys(100)
     
     alpha = 1e-5
