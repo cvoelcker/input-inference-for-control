@@ -76,7 +76,7 @@ class ParticleI2cCell():
     def backward_done(self):
         return self.back_particles is not None
 
-    def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
+    def forward(self, u_params, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
         new_u = []
         new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
         # new_u = np.zeros((self.num_p, 1))
@@ -211,7 +211,7 @@ class ParticleI2cGraph():
         alpha = init_alpha
         _iter = 0
         while True and _iter < max_iter:
-            self._expectation(init_alpha, _iter, use_time_alpha)
+            v, g = value_and_grad(self._expectation(u_params, init_alpha, _iter, use_time_alpha))
             next_alpha, converged = self._maximization(alpha, use_time_alpha)
             # alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
             if use_time_alpha and self.check_alpha_converged():
@@ -221,7 +221,7 @@ class ParticleI2cGraph():
             _iter += 1
         return next_alpha
 
-    def _expectation(self, alpha, iteration, use_time_alpha=False):
+    def _expectation(self, u_params, alpha, iteration, use_time_alpha=False):
         """Runs the forward, backward smoothing algorithm to estimate the
         current optimal state action trajectory
         
@@ -283,6 +283,7 @@ class ParticleI2cGraph():
 
         for i, c in enumerate(list(reversed(self.cells))):
             c.back_particles = self.all_samples[i]
+        return np.sum([c.smoothing_weights for c in self.cells])
         
     def _maximization(self, alpha, use_time_alpha=False):
         ## JOINT UPDATE

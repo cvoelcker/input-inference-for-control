@@ -230,21 +230,42 @@ class MLP:
     def params(self):
         return (self.net_params, self.mean_params, self.var_params)
 
-    def conditional_sample(self, x):
-        def network(params, x):
-            y = self.net(params[0], x)
-            mu = self.mean_net(params[1], y)
-            var = self.mean_net(params[2], y)
-            return mu, var
+    @property
+    def nets(self):
+        return (self.net, self.mean_net, self.var_net)
+    
+    @staticmethod
+    def conditional_sample(params, nets, x):
+        y = nets[0](params[0], x)
+        mu = nets[1](params[1], y)
+        var = nets[2](params[2], y)
+        return mu, var
 
-        return network(self.params, x)
+    # def update_params(self, update, alpha=7e-4):
+    #     new_net_params = [[] for i in range(len(self.net_params))]
+    #     for i, ((w, b), (wg, bg)) in enumerate(zip(self.net_params, update[0])):
+    #         new_net_params[i] = [0, 0]
+    #         new_net_params[i][0] = w - wg * alpha
+    #         new_net_params[i][1] = b - bg * alpha
+    #     for i, (v, g) in enumerate(zip(self.mean_params, update[1])):
+    #         self.mean_params[i] = v - g * alpha
+    #     for i, (v, g) in enumerate(zip(self.var_params, update[2])):
+    #         self.var_params[i] = v - g * alpha
+
+    # def conditional_sample(self, x):
+    #     def network(params, x):
+    #         y = self.net(params[0], x)
+    #         mu = self.mean_net(params[1], y)
+    #         var = self.mean_net(params[2], y)
+    #         return mu, var
+
+    #     return network(self.params, x)
 
     def conditional_mean():
         pass
 
     def update():
         pass
-
     
 
 if __name__ == "__main__":
