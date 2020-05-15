@@ -54,7 +54,7 @@ if __name__ == "__main__":
     
     alpha = 1e-5
     particle_graph = ParticleI2cGraph(
-        sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 0.1, np.array([0., 0., 0.]), 10000., alpha, 2, u_samples, num_runs)
+        sys, cost, 10, num_p, num_p//10, np.array([5., 5.]), 0.1, np.array([0., 0., 0.]), 100., alpha, 2, u_samples, num_runs)
     plotter = ParticlePlotter(particle_graph)
 
     costs_over_run = []
@@ -67,7 +67,7 @@ if __name__ == "__main__":
         # alpha_over_run.append(alpha)
         # alpha = np.clip(particle_graph.run(alpha, False, 1), 0.66*alpha, 1.5*alpha)
         alpha = particle_graph.run(alpha, False, 2)
-        plotter.plot_all('Round ' + str(i), sys, cost)
+        # plotter.plot_all('Round ' + str(i), sys, cost)
         
         print('Updated graph {}, new alpha {}'.format(i, alpha))
 

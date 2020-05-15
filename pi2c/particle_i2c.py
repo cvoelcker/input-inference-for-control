@@ -12,16 +12,20 @@ import dill
 from tqdm import tqdm
 from abc import ABC, abstractmethod
 
+import torch
+from torch import nn, optim
+
 import cProfile
 
 from pi2c.utils import converged_list, finite_horizon_lqr, GaussianPrior
 from pi2c.jax_gmm import GMM
 from pi2c.cost_function import Cost2Prob
+from pi2c.policy_torch import GaussianMlpPolicy
 
 
-class ParticleI2cCell():
+class ParticleI2cCell(nn.Module):
 
-    def __init__(self, i, sys, cost, num_p, M, alpha_init, gmm_components=4, u_samples=10):
+    def __init__(self, i, sys, cost, num_p, M, alpha_init, policy, gmm_components=4, u_samples=10):
         """Initializes a particel swarm cell at a specific time index
         
         Arguments:
@@ -31,6 +35,7 @@ class ParticleI2cCell():
             num_p {int} -- number of particles
             M {int} -- number of backward trajectories for smoothing
         """
+        super().__init__()
         self.i = i
         self.sys = sys
         self.dim_u = sys.dim_u
@@ -50,7 +55,7 @@ class ParticleI2cCell():
         self.back_weights = None
 
         # build broad EM prior
-        self.xu_joint = GMM(self.dim_x + self.dim_u, gmm_components)
+        self.xu_joint = policy
 
         self.u_samples = u_samples
 
@@ -64,56 +69,67 @@ class ParticleI2cCell():
         new_cell.back_weights = self.back_weights.copy()
         return new_cell
 
+    @property
     def particles_x(self):
         return self.back_particles[:, :self.dim_x]
 
+    @property
     def particles_u(self):
         return self.back_particles[:, self.dim_x:]
 
+    @property
     def forward_done(self):
         return self.particles is not None
 
+    @property
     def backward_done(self):
         return self.back_particles is not None
 
-    def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
+    def forward_pass(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
         new_u = []
-        new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
-        assert not np.any(np.isnan(new_u)), new_u
-        particles = np.repeat(particles, self.u_samples, 0)
+        new_u = self.xu_joint(particles, self.u_samples)
+        particles = torch.repeat_interleave(particles, self.u_samples, 0)
         if use_time_alpha:
-            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
+            samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
         else:
-            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
-        self.particles = np.concatenate([particles, new_u], 1)[samples]
-        assert not np.any(np.isnan(self.particles))
+            samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
+        self.log_weights = log_weights[samples].squeeze()
+        self.particles = torch.cat([particles, new_u], 1)[samples]
         self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
         return self.new_particles, self.particles, failed
 
-    def backward(self, particles):
-        backwards = []
+    def backward_pass(self, particles, log_p_weights):
         smoothing_weights = []
-        all_samples = []
-        for p in particles:
+        for p, log_p_weight in zip(particles, log_p_weights):
             p = p[:self.dim_x].reshape(-1, 1)
-            particle_likelihood = self.sys.likelihood(
+            log_sample_weight = self.sys.likelihood(
                 self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p)
-            # renormalize
-            particle_likelihood /= np.sum(particle_likelihood)
-            # sample likely ancestor
-            samples = np.random.choice(
-                np.arange(self.num_p//self.u_samples), 
-                size=1, 
-                replace=True, 
-                p=particle_likelihood)
-            all_samples.append(samples)
-            # save backwards sample
-            backwards.append(self.particles[samples].reshape(-1))
-            # save smoothing weights
-            smoothing_weights.append(particle_likelihood)
-        self.back_particles = np.array(backwards)
-        self.back_weights = np.array(smoothing_weights)
-        return np.array(self.back_particles)
+            print(log_sample_weight.shape)
+            print(self.log_weights.shape)
+            print(log_sample_weight.shape)
+            print(log_p_weight.shape)
+            print(log_p_weight)
+            log_weight = log_sample_weight + self.log_weights - torch.logsumexp(self.log_weights + log_sample_weight, 0) + log_p_weight
+            print(log_weight)
+            smoothing_weights.append(log_weight)
+            # # renormalize
+            # # sample likely ancestor
+            # samples = np.random.choice(
+            #     np.arange(self.num_p//self.u_samples), 
+            #     size=1, 
+            #     replace=True, 
+            #     p=particle_likelihood)
+            # # save backwards sample
+            # backwards.append(self.particles[samples].reshape(-1))
+            # # save smoothing weights
+            # smoothing_weights.append(particle_likelihood)
+        self.back_particles = self.particles
+        back_weights = torch.stack(smoothing_weights, 1)
+        print(self.log_weights)
+        self.back_weights = torch.logsumexp(back_weights, 0)
+        print(self.back_weights)
+        print(self.back_weights.shape)
+        return np.array(self.back_particles), self.back_weights
 
     def policy(self, x):
         """Extracts a policy from the posterior particle GMM
@@ -168,16 +184,22 @@ class ParticleI2cGraph():
         self.M = M
         self.u_samples = u_samples
         self.num_f_p = self.num_p//self.u_samples
-        self.alpha = alpha_init
+        self.alpha = torch.tensor([np.log(1e-5)], requires_grad=True)
 
         self.mu_x0 = mu_x0
         self.mu_u0 = mu_u0
         self.sig_x0 = sig_x0
         self.sig_u0 = sig_u0
+        
+        self.policy = GaussianMlpPolicy([10, 5], self.sys.dim_x, self.sys.dim_u, self.mu_u0, self.sig_u0)
+
+        # torch functions
+        self.optimizer = optim.Adam([{'params': self.policy.parameters()},
+                                     {'params': self.alpha}], lr=7e-4)
 
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, gmm_components, u_samples))
+            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, self.policy, gmm_components, u_samples))
 
         self.gmm_components = gmm_components
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
@@ -193,22 +215,13 @@ class ParticleI2cGraph():
     def is_multimodal(self):
         return self.gmm_components > 1
 
-    def init_costs(self):
-        """Get an MC estimate of the current cost function integral (currently not used)
-        """
-        num_samples = 10000
-
-        s_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_x))
-        a_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_u))
-
-        self.sample_costs = self.cost(s_grid, a_grid)
-
     def run(self, init_alpha, use_time_alpha=False, max_iter=1000):
         # if use_time_alpha:
         #     for c in self.cells:
         #         c.alpha = init_alpha
-        alpha = init_alpha
+        alpha = self.alpha
         _iter = 0
+        max_iter = 100000
         while True and _iter < max_iter:
             self._expectation(init_alpha, _iter, use_time_alpha)
             next_alpha, converged = self._maximization(alpha, use_time_alpha)
@@ -227,77 +240,40 @@ class ParticleI2cGraph():
         Arguments:
             alpha {float} -- the current alpha optimization parameter
         """
-        all_samples = []
-        all_f_samples = []
-        failed_counter = 0
-        i = self.num_runs
-        num_seq_failed = 0
-        with tqdm(total=self.num_runs) as pbar:
-            while i > 0:
-                run_samples = []
-                run_f_samples = []
-                # sample initial x from the systems inital distribution
-                particles = self.x0_dist.sample(self.num_p//self.u_samples)
+        # sample initial x from the systems inital distribution
+        particles = self.x0_dist.sample(self.num_p//self.u_samples)
 
-                neg = np.random.choice(
-                        np.arange(len(particles)),
-                        len(particles)//2,
-                        replace=False)
-                particles[neg] = -particles[neg]
-                
-                failed = False
-                # run per cell loop
-                for c in self.cells:
-                    particles, sampled, failed = c.forward(particles, iteration, failed, alpha, use_time_alpha)
-                    run_f_samples.append(sampled.copy())
-                    # check if all particle trajectories have a numeric probability of 0
-                    if failed:
-                        num_seq_failed += 1
-                        break
-                if not failed:
-                    num_seq_failed = 0
-                    # initialize the backwards sample
-                    # here, the particles need to be weighted according to the final thing
-                    # (actually, they don't really, since they where weighted in the final round of the forward
-                    # pass), we went one step "too far"
-                    # due to no reweigh, I'm aslo sampling without replacing
-                    if self.M > self.num_p//self.u_samples:
-                        self.M = self.num_p//self.u_samples
-                    backwards_samples = np.random.choice(
-                        np.arange(self.num_p//self.u_samples), 
-                        self.M, 
-                        replace=False)
-                    particles = particles[backwards_samples]
-                    
-                    # run backwards smoothing via sampling
-                    for c in list(reversed(self.cells)):
-                        particles = c.backward(particles)
-                        run_samples.append(particles.copy())
-                    all_samples.append(run_samples)
-                    all_f_samples.append(run_f_samples)
-                    i -= 1
-                    pbar.update(1)
-        self.all_samples = np.concatenate(all_samples, 1)
-        self.all_f_samples = np.concatenate(all_f_samples, 1)
+        neg = np.random.choice(
+                np.arange(len(particles)),
+                len(particles)//2,
+                replace=False)
+        particles[neg] = -particles[neg]
 
-        for i, c in enumerate(list(reversed(self.cells))):
-            c.back_particles = self.all_samples[i]
+        particles = torch.Tensor(particles)
+        
+        failed = False
+        # run per cell loop
+        for c in self.cells:
+            particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
+            c.back_weights = c.log_weights
+        if iteration % 10 == 0:
+            print(torch.exp(self.alpha))
+            print(particles.mean(0))
+            print(particles.var(0))
+        # b_weights = torch.ones((self.num_p, ))
+        # if not failed:
+        #     # run backwards smoothing via sampling
+        #     for c in list(reversed(self.cells)):
+        #         particles, b_weights = c.backward_pass(particles, b_weights)
         
     def _maximization(self, alpha, use_time_alpha=False):
         ## JOINT UPDATE
-        ll = 0.
-        v = 0.
-        for i, c in tqdm(list(enumerate(self.cells))):
-            c.xu_joint.update_parameters(c.back_particles)
-            r = c.current_backward_costs()
-            ll += r[0]
-            v  += r[1]
-        print(self.cells[-1].back_particles.mean(0))
-        print(self.cells[-1].back_particles.var(0))
-        print(ll/100.)
-        print(v/100.)
-        if self.UPDATE_ALPHA:
-            alpha, converged = self._alpha_update(alpha, use_time_alpha)
+        loss = torch.stack([torch.logsumexp(c.back_weights,0) for c in self.cells])
+        loss = -loss.mean()
+        loss.backward()
+        # print(loss)
+        self.optimizer.step()
+        converged = False
         return alpha, converged
 
     def _alpha_update(self, alpha, use_time_alpha=False):

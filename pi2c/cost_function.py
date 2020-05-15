@@ -1,6 +1,9 @@
 import numpy as np
 from abc import ABC, abstractmethod
 
+import torch
+from torch.distributions import Gumbel
+
 class EnvCostFunction(ABC):
     normalized = False
     constant_goal = False
@@ -26,8 +29,8 @@ class QRCost(EnvCostFunction):
     R = None
 
     def __init__(self, Q, R):
-        self.Q = Q
-        self.R = R
+        self.Q = torch.Tensor(Q)
+        self.R = torch.Tensor(R)
 
     def _cost(self, x, u, xg, ug):
         _x = x - xg
@@ -47,20 +50,20 @@ class StaticQRCost(QRCost):
 
     def __init__(self, Q, R, xg, ug):
         super().__init__(Q, R)
-        self.xg = xg
-        self.ug = ug
-        self.zg = np.concatenate([xg, ug], 1)
-        self.dim = self.zg.size
-        self.QR = np.zeros((self.dim, self.dim))
-        self.QR[:xg.size,:xg.size] = Q
-        self.QR[xg.size:,xg.size:] = R
+        self.zg = torch.Tensor(np.concatenate([xg, ug], 1))
+        self.dim = self.zg.size()[1]
+        self.QR = torch.zeros((self.dim, self.dim))
+        self.QR[:xg.size,:xg.size] = torch.Tensor(Q)
+        self.QR[xg.size:,xg.size:] = torch.Tensor(R)
+        self.xg = torch.Tensor(xg)
+        self.ug = torch.Tensor(ug)
 
     def _cost(self, x, u, xg, ug):
         _x = x - xg
         _u = u - ug
-        
-        Q_cost = np.diag(_x @ self.Q @ _x.T)
-        R_cost = np.diag(_u @ self.R @ _u.T)
+
+        Q_cost = torch.diag(_x @ self.Q @ _x.T)
+        R_cost = torch.diag(_u @ self.R @ _u.T)
 
         return -(Q_cost + R_cost)
 
@@ -76,9 +79,9 @@ class Cost2Prob():
 
     def log_sample(self, x, u, n, alpha=1., xg=None, ug=None):
         costs = alpha * self.c.cost(x, u, xg, ug).reshape(-1,1) # unnormalized log probabilities
-        samples = np.random.gumbel(size=(x.shape[0],n))
+        samples = Gumbel(loc=0., scale=1.).sample((x.shape[0],n))
         log_gumbel = costs + samples
-        choices = np.argmax(log_gumbel, 0)
+        _, choices = torch.max(log_gumbel, 0)
         return choices, costs
     
     def __call__(self, x, u, alpha=1., xg=None, ug=None):
