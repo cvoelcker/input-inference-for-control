@@ -54,7 +54,7 @@ if __name__ == "__main__":
     
     alpha = 1e-5
     particle_graph = ParticleI2cGraph(
-        sys, cost, 10, num_p, num_p//10, np.array([5., 5.]), 0.1, np.array([0., 0., 0.]), 100., alpha, 2, u_samples, num_runs)
+        sys, cost, 100, num_p, num_p//10, np.array([5., 5.]), 0.1, np.array([0., 0., 0.]), 10., alpha, 2, u_samples, num_runs)
     plotter = ParticlePlotter(particle_graph)
 
     costs_over_run = []

@@ -191,11 +191,13 @@ class ParticleI2cGraph():
         self.sig_x0 = sig_x0
         self.sig_u0 = sig_u0
         
-        self.policy = GaussianMlpPolicy([10, 5], self.sys.dim_x, self.sys.dim_u, self.mu_u0, self.sig_u0)
+        self.policy = GaussianMlpPolicy([4], self.sys.dim_x, self.sys.dim_u, self.mu_u0, self.sig_u0)
 
         # torch functions
-        self.optimizer = optim.Adam([{'params': self.policy.parameters()},
-                                     {'params': self.alpha}], lr=7e-4)
+        self.optimizer = optim.Adam(
+                [{'params': self.policy.parameters()},
+                 # {'params': self.alpha}
+                 ], lr=7e-4)
 
         self.cells = []
         for t in range(T):
@@ -223,8 +225,8 @@ class ParticleI2cGraph():
         _iter = 0
         max_iter = 100000
         while True and _iter < max_iter:
-            self._expectation(init_alpha, _iter, use_time_alpha)
-            next_alpha, converged = self._maximization(alpha, use_time_alpha)
+            weights = self._expectation(init_alpha, _iter, use_time_alpha)
+            next_alpha, converged = self._maximization(alpha, weights, use_time_alpha)
             # alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
             if use_time_alpha and self.check_alpha_converged():
                     break
@@ -241,37 +243,45 @@ class ParticleI2cGraph():
             alpha {float} -- the current alpha optimization parameter
         """
         # sample initial x from the systems inital distribution
-        particles = self.x0_dist.sample(self.num_p//self.u_samples)
-
-        neg = np.random.choice(
-                np.arange(len(particles)),
-                len(particles)//2,
-                replace=False)
-        particles[neg] = -particles[neg]
-
-        particles = torch.Tensor(particles)
-        
-        failed = False
+        all_weights = []
         # run per cell loop
-        for c in self.cells:
-            particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
-            c.back_weights = c.log_weights
+        for i in range(self.num_runs):
+            particles = self.x0_dist.sample(self.num_p//self.u_samples)
+
+            # neg = np.random.choice(
+            #         np.arange(len(particles)),
+            #         len(particles)//2,
+            #         replace=False)
+            # particles[neg] = -particles[neg]
+
+            particles = torch.Tensor(particles)
+            
+            failed = False
+            for c in self.cells:
+                particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
+                all_weights.append(torch.logsumexp(c.log_weights, 0))
         if iteration % 10 == 0:
+            print(iteration)
             print(torch.exp(self.alpha))
             print(particles.mean(0))
             print(particles.var(0))
+            loss = torch.stack(all_weights)
+            loss = -loss.mean()
+            print(loss)
+            print()
         # b_weights = torch.ones((self.num_p, ))
         # if not failed:
         #     # run backwards smoothing via sampling
         #     for c in list(reversed(self.cells)):
         #         particles, b_weights = c.backward_pass(particles, b_weights)
+        return all_weights
         
-    def _maximization(self, alpha, use_time_alpha=False):
+    def _maximization(self, alpha, weights, use_time_alpha=False):
         ## JOINT UPDATE
-        loss = torch.stack([torch.logsumexp(c.back_weights,0) for c in self.cells])
+        loss = torch.stack(weights)
         loss = -loss.mean()
         loss.backward()
-        # print(loss)
+        nn.utils.clip_grad_norm_(self.policy.parameters(), 5.)
         self.optimizer.step()
         converged = False
         return alpha, converged

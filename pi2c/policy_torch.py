@@ -24,16 +24,27 @@ class GaussianMlpPolicy(nn.Module):
                 nn.Linear(in_dim, in_dim),
                 nn.ReLU(),
                 nn.Linear(in_dim, out_dim))
-        self.init_mu = 0# torch.Tensor(init_mu)
-        self.init_var = init_var
+        self.init_var = nn.Parameter(torch.log(torch.tensor(init_var, requires_grad=True)))
+        self.mu_dampen = nn.Parameter(torch.tensor(1e-2), requires_grad=True)
         self.out_dim = out_dim
+        self.i_counter = 0
 
     def forward(self, x, n):
         batch_dim = x.shape[0]
-        x = self.net(x)
-        mu = self.mu_head(x) + self.init_mu
-        var = torch.exp(self.var_head(x)) * self.init_var
+        b = self.net(x)
+        mu = self.mu_head(b) * self.mu_dampen
+        var = torch.exp(self.var_head(b) + self.init_var) + 0.1
         dist = Normal(mu, var)
         samples = dist.rsample((n, )).view(-1, self.out_dim)
+        # if self.i_counter > 10000:
+        #     print(x)
+        #     print(mu)
+        #     print(var)
+        #     print(samples)
+        #     print(self.mu_dampen)
+        #     exit()
+        # else:
+        #     self.i_counter += 1
+        # print(torch.any(torch.isnan(samples)))
         return samples
 
