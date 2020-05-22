@@ -64,7 +64,6 @@ class StaticQRCost(QRCost):
 
         Q_cost = torch.diag(_x @ self.Q @ _x.T)
         R_cost = torch.diag(_u @ self.R @ _u.T)
-
         return -(Q_cost + R_cost)
 
 
@@ -81,6 +80,7 @@ class Cost2Prob():
         costs = alpha * self.c.cost(x, u, xg, ug).reshape(-1,1) # unnormalized log probabilities
         samples = Gumbel(loc=0., scale=1.).sample((x.shape[0],n))
         log_gumbel = costs + samples
+        assert torch.all(torch.isfinite(log_gumbel))
         _, choices = torch.max(log_gumbel, 0)
         return choices, costs
     

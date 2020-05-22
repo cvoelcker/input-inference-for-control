@@ -55,7 +55,8 @@ class ParticleI2cCell(nn.Module):
         self.back_weights = None
 
         # build broad EM prior
-        self.xu_joint = policy
+        self.xu_joint = GaussianMlpPolicy([4], self.sys.dim_x, self.sys.dim_u, None, 10.)
+        # self.xu_joint = policy
 
         self.u_samples = u_samples
 
@@ -93,43 +94,18 @@ class ParticleI2cCell(nn.Module):
             samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
         else:
             samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
+        samples = samples.detach()
+        self.samples = samples//self.u_samples
         self.log_weights = log_weights[samples].squeeze()
         self.particles = torch.cat([particles, new_u], 1)[samples]
         self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
+        assert not torch.any(torch.isnan(self.new_particles)), particles
         return self.new_particles, self.particles, failed
 
-    def backward_pass(self, particles, log_p_weights):
-        smoothing_weights = []
-        for p, log_p_weight in zip(particles, log_p_weights):
-            p = p[:self.dim_x].reshape(-1, 1)
-            log_sample_weight = self.sys.likelihood(
-                self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p)
-            print(log_sample_weight.shape)
-            print(self.log_weights.shape)
-            print(log_sample_weight.shape)
-            print(log_p_weight.shape)
-            print(log_p_weight)
-            log_weight = log_sample_weight + self.log_weights - torch.logsumexp(self.log_weights + log_sample_weight, 0) + log_p_weight
-            print(log_weight)
-            smoothing_weights.append(log_weight)
-            # # renormalize
-            # # sample likely ancestor
-            # samples = np.random.choice(
-            #     np.arange(self.num_p//self.u_samples), 
-            #     size=1, 
-            #     replace=True, 
-            #     p=particle_likelihood)
-            # # save backwards sample
-            # backwards.append(self.particles[samples].reshape(-1))
-            # # save smoothing weights
-            # smoothing_weights.append(particle_likelihood)
-        self.back_particles = self.particles
-        back_weights = torch.stack(smoothing_weights, 1)
-        print(self.log_weights)
-        self.back_weights = torch.logsumexp(back_weights, 0)
-        print(self.back_weights)
-        print(self.back_weights.shape)
-        return np.array(self.back_particles), self.back_weights
+    def backward_pass(self, samples):
+        samples = self.samples[samples]
+        self.log_weights = self.log_weights[samples]
+        return samples
 
     def policy(self, x):
         """Extracts a policy from the posterior particle GMM
@@ -177,6 +153,8 @@ class ParticleI2cGraph():
             num_p {[type]} -- [description]
             M {[type]} -- [description]
         """
+        self.log_id = 0
+
         self.sys = sys
         self.cost = cost
         self.T = T
@@ -184,7 +162,7 @@ class ParticleI2cGraph():
         self.M = M
         self.u_samples = u_samples
         self.num_f_p = self.num_p//self.u_samples
-        self.alpha = torch.tensor([np.log(1e-5)], requires_grad=True)
+        self.alpha = torch.tensor([np.log(1e-4)], requires_grad=True)
 
         self.mu_x0 = mu_x0
         self.mu_u0 = mu_u0
@@ -193,15 +171,19 @@ class ParticleI2cGraph():
         
         self.policy = GaussianMlpPolicy([4], self.sys.dim_x, self.sys.dim_u, self.mu_u0, self.sig_u0)
 
-        # torch functions
-        self.optimizer = optim.Adam(
-                [{'params': self.policy.parameters()},
-                 # {'params': self.alpha}
-                 ], lr=7e-4)
-
         self.cells = []
         for t in range(T):
             self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, self.policy, gmm_components, u_samples))
+
+        # torch functions
+        self.optimizer = optim.Adam(
+                [
+                    # {'params': self.policy.parameters()},
+                    {'params': c.xu_joint.parameters()} for c in self.cells
+                 ] + [
+                    #{'params': self.alpha}
+                ]
+                , lr=1e-3)
 
         self.gmm_components = gmm_components
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
@@ -217,22 +199,27 @@ class ParticleI2cGraph():
     def is_multimodal(self):
         return self.gmm_components > 1
 
-    def run(self, init_alpha, use_time_alpha=False, max_iter=1000):
+    def run(self, init_alpha, it, use_time_alpha=False, max_iter=1000):
         # if use_time_alpha:
         #     for c in self.cells:
         #         c.alpha = init_alpha
         alpha = self.alpha
         _iter = 0
-        max_iter = 100000
-        while True and _iter < max_iter:
+        max_iter = 10000
+        # while True and _iter < max_iter:
+        losses = []
+        for _iter in tqdm(range(max_iter)):
             weights = self._expectation(init_alpha, _iter, use_time_alpha)
-            next_alpha, converged = self._maximization(alpha, weights, use_time_alpha)
+            next_alpha, loss, converged = self._maximization(alpha, weights, use_time_alpha)
             # alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
+            losses.append(loss.detach().numpy())
             if use_time_alpha and self.check_alpha_converged():
                     break
             elif converged:
                 break
-            _iter += 1
+            # _iter += 1
+        np.savetxt('losses_{}_{}.npy'.format(it, self.log_id), losses)
+        self.log_id += 1
         return next_alpha
 
     def _expectation(self, alpha, iteration, use_time_alpha=False):
@@ -259,16 +246,27 @@ class ParticleI2cGraph():
             failed = False
             for c in self.cells:
                 particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
+            # samples = np.arange(self.num_p//self.u_samples)
+            # for c in reversed(self.cells):
+            #     samples = c.backward_pass(samples)
                 all_weights.append(torch.logsumexp(c.log_weights, 0))
-        if iteration % 10 == 0:
-            print(iteration)
-            print(torch.exp(self.alpha))
-            print(particles.mean(0))
-            print(particles.var(0))
-            loss = torch.stack(all_weights)
-            loss = -loss.mean()
-            print(loss)
-            print()
+        # if iteration % 10 == 0:
+        #     print(iteration)
+        #     print(torch.exp(self.alpha))
+        #     print(particles.mean(0))
+        #     print(particles.var(0))
+        #     print()
+        #     print(np.max([torch.exp(c.xu_joint.init_var) for c in self.cells]))
+        #     print(np.min([torch.exp(c.xu_joint.init_var) for c in self.cells]))
+        #     print(self.cells[0].xu_joint.mu_head[0].weight)
+        #     print(self.cells[0].xu_joint.mu_head[0].bias)
+        #     # print(torch.exp(self.cells[-2].xu_joint.init_var))
+        #     # print(self.cells[-2].xu_joint.mu_head[0].weight)
+        #     loss = torch.stack(all_weights)
+        #     loss = torch.sum(loss)
+        #     print(loss)
+        #     # print(self.cells[1].log_weights)
+        #     print()
         # b_weights = torch.ones((self.num_p, ))
         # if not failed:
         #     # run backwards smoothing via sampling
@@ -279,12 +277,15 @@ class ParticleI2cGraph():
     def _maximization(self, alpha, weights, use_time_alpha=False):
         ## JOINT UPDATE
         loss = torch.stack(weights)
-        loss = -loss.mean()
+        loss = -torch.sum(loss)
         loss.backward()
-        nn.utils.clip_grad_norm_(self.policy.parameters(), 5.)
+        # for c in self.cells:
+            # nn.utils.clip_grad_norm_(c.xu_joint.parameters(), 100.)
+        # nn.utils.clip_grad_norm_(self.policy.parameters(), 10.)
         self.optimizer.step()
+        # print(self.policy.mu_head[0].weight)
         converged = False
-        return alpha, converged
+        return alpha, loss, converged
 
     def _alpha_update(self, alpha, use_time_alpha=False):
         # aka update alpha
