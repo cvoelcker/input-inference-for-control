@@ -162,7 +162,7 @@ class ParticleI2cGraph():
         self.M = M
         self.u_samples = u_samples
         self.num_f_p = self.num_p//self.u_samples
-        self.alpha = torch.tensor([np.log(1e-4)], requires_grad=True)
+        self.alpha = torch.tensor([np.log(1e-2)], requires_grad=True)
 
         self.mu_x0 = mu_x0
         self.mu_u0 = mu_u0
@@ -183,7 +183,7 @@ class ParticleI2cGraph():
                  ] + [
                     #{'params': self.alpha}
                 ]
-                , lr=1e-3)
+                , lr=1e-4)
 
         self.gmm_components = gmm_components
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
@@ -246,9 +246,9 @@ class ParticleI2cGraph():
             failed = False
             for c in self.cells:
                 particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
-            # samples = np.arange(self.num_p//self.u_samples)
-            # for c in reversed(self.cells):
-            #     samples = c.backward_pass(samples)
+            samples = np.arange(self.num_p//self.u_samples)
+            for c in reversed(self.cells):
+                samples = c.backward_pass(samples)
                 all_weights.append(torch.logsumexp(c.log_weights, 0))
         # if iteration % 10 == 0:
         #     print(iteration)
