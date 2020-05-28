@@ -102,10 +102,10 @@ class ParticleI2cCell(nn.Module):
         assert not torch.any(torch.isnan(self.new_particles)), particles
         return self.new_particles, self.particles, failed
 
-    def backward_pass(self, samples):
+    def backward_pass(self, samples, weights):
         samples = self.samples[samples]
-        self.log_weights = self.log_weights[samples]
-        return samples
+        self.log_weights = self.log_weights[samples] + weights
+        return samples, self.log_weights
 
     def policy(self, x):
         """Extracts a policy from the posterior particle GMM
@@ -247,8 +247,9 @@ class ParticleI2cGraph():
             for c in self.cells:
                 particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
             samples = np.arange(self.num_p//self.u_samples)
+            weights = c[-1].log_weights
             for c in reversed(self.cells):
-                samples = c.backward_pass(samples)
+                samples, weights = c.backward_pass(samples, weights)
                 all_weights.append(torch.logsumexp(c.log_weights, 0))
         # if iteration % 10 == 0:
         #     print(iteration)
