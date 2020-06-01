@@ -124,10 +124,10 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         x += self.normal.sample((x.shape[1],)).squeeze().view(x.shape)
         return x
 
-    def likelihood(self, x0, u, x1):
+    def log_likelihood(self, x0, u, x1):
         _x = self.A @ x0 + self.B @ u + self.a
-        _x -= x1
-        return self.normal.log_prob(_x.T)
+        mu = _x - x1
+        return self.normal.log_prob(mu.T)
 
 class PendulumKnown(env_def.PendulumKnown, BaseSim):
 

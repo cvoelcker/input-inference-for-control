@@ -20,7 +20,7 @@ import cProfile
 from pi2c.utils import converged_list, finite_horizon_lqr, GaussianPrior
 from pi2c.jax_gmm import GMM
 from pi2c.cost_function import Cost2Prob
-from pi2c.policy_torch import GaussianMlpPolicy
+from pi2c.policy_torch import LogLinearPolicy
 
 
 class ParticleI2cCell(nn.Module):
@@ -55,7 +55,7 @@ class ParticleI2cCell(nn.Module):
         self.back_weights = None
 
         # build broad EM prior
-        self.xu_joint = GaussianMlpPolicy([4], self.sys.dim_x, self.sys.dim_u, None, 10.)
+        self.xu_joint = LogLinearPolicy(self.sys.dim_x, self.sys.dim_u, 10.)
         # self.xu_joint = policy
 
         self.u_samples = u_samples
@@ -102,10 +102,21 @@ class ParticleI2cCell(nn.Module):
         assert not torch.any(torch.isnan(self.new_particles)), particles
         return self.new_particles, self.particles, failed
 
-    def backward_pass(self, samples, weights):
+    def greedy_backward_reweighing(self, samples, weights):
         samples = self.samples[samples]
         self.log_weights = self.log_weights[samples] + weights
         return samples, self.log_weights
+
+    def backward_smoothing(self, samples, weights):
+        smoothed_weights = []
+        for p in self.particles:
+            p = p.reshape(1,-1)
+            forward_ll = self.sys.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T)
+            forward_ll_w = forward_ll + weights
+            forward_ll_norm = torch.logsumexp(forward_ll + self.log_weights, 0)
+            forward_ll_w_normalized = torch.logsumexp(forward_ll_w - forward_ll_norm, 0)
+            smoothed_weights.append(forward_ll_w_normalized)
+        return self.particles, torch.tensor(smoothed_weights)
 
     def policy(self, x):
         """Extracts a policy from the posterior particle GMM
@@ -140,6 +151,12 @@ class ParticleI2cCell(nn.Module):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
         return c.mean(), c.var()
 
+    def save_state(self, save_path):
+        torch.save(self.xu_joint, save_path.format(self.i))
+
+    def load_state(self, save_path):
+        self.xu_joint = torch.load(save_path.format(i))
+
 
 class ParticleI2cGraph():
     
@@ -169,11 +186,11 @@ class ParticleI2cGraph():
         self.sig_x0 = sig_x0
         self.sig_u0 = sig_u0
         
-        self.policy = GaussianMlpPolicy([4], self.sys.dim_x, self.sys.dim_u, self.mu_u0, self.sig_u0)
+        # self.policy = GaussianMlpPolicy([4], self.sys.dim_x, self.sys.dim_u, self.mu_u0, self.sig_u0)
 
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, self.policy, gmm_components, u_samples))
+            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, None, gmm_components, u_samples)) #self.policy, gmm_components, u_samples))
 
         # torch functions
         self.optimizer = optim.Adam(
@@ -246,10 +263,11 @@ class ParticleI2cGraph():
             failed = False
             for c in self.cells:
                 particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
-            samples = np.arange(self.num_p//self.u_samples)
+            # samples = np.arange(self.num_p//self.u_samples)
             weights = self.cells[-1].log_weights
+            samples = particles
             for c in reversed(self.cells):
-                samples, weights = c.backward_pass(samples, weights.detach())
+                samples, weights = c.backward_smoothing(samples, weights.detach())
                 all_weights.append(torch.logsumexp(c.log_weights, 0))
         # if iteration % 10 == 0:
         #     print(iteration)
