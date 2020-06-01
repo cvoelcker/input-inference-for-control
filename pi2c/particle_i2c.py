@@ -218,7 +218,7 @@ class ParticleI2cGraph():
             elif converged:
                 break
             # _iter += 1
-        np.savetxt('losses_{}_{}.npy'.format(it, self.log_id), losses)
+        np.savetxt('clipped_log/losses_{}_{}.npy'.format(it, self.log_id), losses)
         self.log_id += 1
         return next_alpha
 
@@ -247,9 +247,9 @@ class ParticleI2cGraph():
             for c in self.cells:
                 particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
             samples = np.arange(self.num_p//self.u_samples)
-            weights = c[-1].log_weights
+            weights = self.cells[-1].log_weights
             for c in reversed(self.cells):
-                samples, weights = c.backward_pass(samples, weights)
+                samples, weights = c.backward_pass(samples, weights.detach())
                 all_weights.append(torch.logsumexp(c.log_weights, 0))
         # if iteration % 10 == 0:
         #     print(iteration)
@@ -280,8 +280,8 @@ class ParticleI2cGraph():
         loss = torch.stack(weights)
         loss = -torch.sum(loss)
         loss.backward()
-        # for c in self.cells:
-            # nn.utils.clip_grad_norm_(c.xu_joint.parameters(), 100.)
+        for c in self.cells:
+            nn.utils.clip_grad_norm_(c.xu_joint.parameters(), 100.)
         # nn.utils.clip_grad_norm_(self.policy.parameters(), 10.)
         self.optimizer.step()
         # print(self.policy.mu_head[0].weight)

@@ -42,7 +42,7 @@ class GaussianMlpPolicy(nn.Module):
         batch_dim = x.shape[0]
         mu = self.mu_head(x)
         mu = torch.repeat_interleave(mu, n, 0)
-        var = torch.exp(self.init_var) + 0.01
+        var = torch.exp(self.init_var) + 0.5
         dist = Normal(0, 1)
         samples = dist.sample((n*batch_dim, )).view(-1, self.out_dim)
         samples = mu + samples * var
