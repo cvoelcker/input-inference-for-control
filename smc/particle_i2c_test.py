@@ -48,6 +48,7 @@ if __name__ == "__main__":
     num_p = int(sys.argv[1])
     u_samples = int(sys.argv[2])
     num_runs = int(sys.argv[3])
+    log_dir = sys.argv[4]
     print('Hello')
     cost, prob = build_q()
     sys = build_sys(100)
@@ -61,12 +62,12 @@ if __name__ == "__main__":
     alpha_over_run = []
     sys.init_env()
     # alpha = particle_graph.run(alpha, False, 1)
-    for i in range(100):
+    for i in range(1000):
         # costs_over_run.append(costs)
         sys.init_env()
         # alpha_over_run.append(alpha)
         # alpha = np.clip(particle_graph.run(alpha, False, 1), 0.66*alpha, 1.5*alpha)
-        alpha = particle_graph.run(alpha, i + 1, False, 2)
+        alpha = particle_graph.run(alpha, i + 1, False, 2, log_dir)
         # plotter.plot_all('Round ' + str(i), sys, cost)
         
         print('Updated graph {}, new alpha {}'.format(i, alpha))

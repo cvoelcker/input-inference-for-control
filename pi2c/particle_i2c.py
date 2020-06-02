@@ -198,7 +198,7 @@ class ParticleI2cGraph():
                     # {'params': self.policy.parameters()},
                     {'params': c.xu_joint.parameters()} for c in self.cells
                  ] + [
-                    #{'params': self.alpha}
+                    {'params': self.alpha}
                 ]
                 , lr=1e-4)
 
@@ -216,13 +216,13 @@ class ParticleI2cGraph():
     def is_multimodal(self):
         return self.gmm_components > 1
 
-    def run(self, init_alpha, it, use_time_alpha=False, max_iter=1000):
+    def run(self, init_alpha, it, use_time_alpha=False, max_iter=1000, log_dir='log/'):
         # if use_time_alpha:
         #     for c in self.cells:
         #         c.alpha = init_alpha
         alpha = self.alpha
         _iter = 0
-        max_iter = 10000
+        max_iter = 1000
         # while True and _iter < max_iter:
         losses = []
         for _iter in tqdm(range(max_iter)):
@@ -235,7 +235,10 @@ class ParticleI2cGraph():
             elif converged:
                 break
             # _iter += 1
-        np.savetxt('clipped_log/losses_{}_{}.npy'.format(it, self.log_id), losses)
+        np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
+        for c in self.cells:
+            c.save_state('{}/model_state_{}_'.format(log_dir, self.log_id) + '{}.torch')
+        
         self.log_id += 1
         return next_alpha
 
