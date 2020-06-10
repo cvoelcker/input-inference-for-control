@@ -53,6 +53,7 @@ class ParticleI2cCell(nn.Module):
 
         self.back_particles = None
         self.back_weights = None
+        self.strategy = 'greedy'
 
         # build broad EM prior
         self.xu_joint = LogLinearPolicy(self.sys.dim_x, self.sys.dim_u, 10.)
@@ -114,6 +115,18 @@ class ParticleI2cCell(nn.Module):
             forward_ll_w_normalized = torch.logsumexp(forward_ll_w - forward_ll_norm, 0)
             smoothed_weights.append(forward_ll_w_normalized)
         return self.particles, torch.tensor(smoothed_weights)
+
+    def set_backward_strategy(self, strategy):
+        if strategy in ['greedy', 'smoothing']:
+            self.strategy = strategy
+        else:
+            raise ValueError('Strategy unknown')
+
+    def backward(self, samples, weights):
+        if self.strategy == 'greedy':
+            return self.greedy_backward_reweighing(samples, weights)
+        elif self.strategy == 'smoothing':
+            return self.backward_smoothing(samples, weights)
 
     def policy(self, x):
         """Extracts a policy from the posterior particle GMM
@@ -187,17 +200,14 @@ class ParticleI2cGraph():
 
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, None, gmm_components, u_samples)) #self.policy, gmm_components, u_samples))
+            self.cells.append(
+                ParticleI2cCell(
+                    t, sys, cost, num_p, M, alpha_init, None, gmm_components, u_samples))
 
         # torch functions
         self.optimizer = optim.Adam(
-                [
-                    # {'params': self.policy.parameters()},
-                    {'params': c.xu_joint.parameters()} for c in self.cells
-                 ] + [
-                    {'params': self.alpha}
-                ]
-                , lr=1e-4)
+                [{'params': c.xu_joint.parameters()} for c in self.cells
+                 ], lr=1e-4)
 
         self.gmm_components = gmm_components
         self.x0_dist = GaussianPrior(mu_x0, sig_x0)
@@ -240,15 +250,7 @@ class ParticleI2cGraph():
         # run per cell loop
         for i in range(self.num_runs):
             particles = self.x0_dist.sample(self.num_p//self.u_samples)
-
-            # neg = np.random.choice(
-            #         np.arange(len(particles)),
-            #         len(particles)//2,
-            #         replace=False)
-            # particles[neg] = -particles[neg]
-
             particles = torch.Tensor(particles)
-            
             failed = False
             for c in self.cells:
                 particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
@@ -272,6 +274,7 @@ class ParticleI2cGraph():
 
     def _alpha_update(self, alpha, use_time_alpha=False):
         # aka update alpha
+        # this assumes a linear gaussian, or at least MoG joint
         # also has a time-varying alpha idea that was bad (but exciting)
         # we should probably recheck that with the particle filter, since it might
         # help with variance issues
