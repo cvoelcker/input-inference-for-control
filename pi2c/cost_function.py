@@ -77,7 +77,8 @@ class Cost2Prob():
         return np.exp(alpha * self.c.cost(x, u, xg, ug))
 
     def log_sample(self, x, u, n, alpha=1., xg=None, ug=None):
-        costs = alpha * self.c.cost(x, u, xg, ug).reshape(-1,1) # unnormalized log probabilities
+        c = self.c.cost(x, u, xg, ug)
+        costs = alpha * c.reshape(-1,1) # unnormalized log probabilities
         samples = Gumbel(loc=0., scale=1.).sample((x.shape[0],n))
         log_gumbel = costs + samples
         assert torch.all(torch.isfinite(log_gumbel))

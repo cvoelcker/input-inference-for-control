@@ -63,12 +63,8 @@ if __name__ == "__main__":
     sys.init_env()
     # alpha = particle_graph.run(alpha, False, 1)
     for i in range(1000):
-        # costs_over_run.append(costs)
         sys.init_env()
-        # alpha_over_run.append(alpha)
-        # alpha = np.clip(particle_graph.run(alpha, False, 1), 0.66*alpha, 1.5*alpha)
         alpha = particle_graph.run(alpha, i + 1, False, 2, log_dir)
-        # plotter.plot_all('Round ' + str(i), sys, cost)
         
         print('Updated graph {}, new alpha {}'.format(i, alpha))
 

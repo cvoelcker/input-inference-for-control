@@ -90,10 +90,7 @@ class ParticleI2cCell(nn.Module):
         new_u = []
         new_u = self.xu_joint(particles, self.u_samples)
         particles = torch.repeat_interleave(particles, self.u_samples, 0)
-        if use_time_alpha:
-            samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
-        else:
-            samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
+        samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
         samples = samples.detach()
         self.samples = samples//self.u_samples
         self.log_weights = log_weights[samples].squeeze()
@@ -217,24 +214,13 @@ class ParticleI2cGraph():
         return self.gmm_components > 1
 
     def run(self, init_alpha, it, use_time_alpha=False, max_iter=1000, log_dir='log/'):
-        # if use_time_alpha:
-        #     for c in self.cells:
-        #         c.alpha = init_alpha
-        alpha = self.alpha
         _iter = 0
         max_iter = 1000
-        # while True and _iter < max_iter:
         losses = []
         for _iter in tqdm(range(max_iter)):
-            weights = self._expectation(init_alpha, _iter, use_time_alpha)
-            next_alpha, loss, converged = self._maximization(alpha, weights, use_time_alpha)
-            # alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
+            weights = self._expectation(_iter, use_time_alpha)
+            next_alpha, loss, converged = self._maximization(weights, use_time_alpha)
             losses.append(loss.detach().numpy())
-            if use_time_alpha and self.check_alpha_converged():
-                    break
-            elif converged:
-                break
-            # _iter += 1
         np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
         for c in self.cells:
             c.save_state('{}/model_state_{}_'.format(log_dir, self.log_id) + '{}.torch')
@@ -242,7 +228,7 @@ class ParticleI2cGraph():
         self.log_id += 1
         return next_alpha
 
-    def _expectation(self, alpha, iteration, use_time_alpha=False):
+    def _expectation(self, iteration, use_time_alpha=False):
         """Runs the forward, backward smoothing algorithm to estimate the
         current optimal state action trajectory
         
@@ -266,48 +252,23 @@ class ParticleI2cGraph():
             failed = False
             for c in self.cells:
                 particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
-            # samples = np.arange(self.num_p//self.u_samples)
             weights = self.cells[-1].log_weights
             samples = particles
             for c in reversed(self.cells):
                 samples, weights = c.backward_smoothing(samples, weights.detach())
                 all_weights.append(torch.logsumexp(c.log_weights, 0))
-        # if iteration % 10 == 0:
-        #     print(iteration)
-        #     print(torch.exp(self.alpha))
-        #     print(particles.mean(0))
-        #     print(particles.var(0))
-        #     print()
-        #     print(np.max([torch.exp(c.xu_joint.init_var) for c in self.cells]))
-        #     print(np.min([torch.exp(c.xu_joint.init_var) for c in self.cells]))
-        #     print(self.cells[0].xu_joint.mu_head[0].weight)
-        #     print(self.cells[0].xu_joint.mu_head[0].bias)
-        #     # print(torch.exp(self.cells[-2].xu_joint.init_var))
-        #     # print(self.cells[-2].xu_joint.mu_head[0].weight)
-        #     loss = torch.stack(all_weights)
-        #     loss = torch.sum(loss)
-        #     print(loss)
-        #     # print(self.cells[1].log_weights)
-        #     print()
-        # b_weights = torch.ones((self.num_p, ))
-        # if not failed:
-        #     # run backwards smoothing via sampling
-        #     for c in list(reversed(self.cells)):
-        #         particles, b_weights = c.backward_pass(particles, b_weights)
         return all_weights
         
-    def _maximization(self, alpha, weights, use_time_alpha=False):
+    def _maximization(self, weights, use_time_alpha=False):
         ## JOINT UPDATE
         loss = torch.stack(weights)
         loss = -torch.sum(loss)
         loss.backward()
         for c in self.cells:
             nn.utils.clip_grad_norm_(c.xu_joint.parameters(), 100.)
-        # nn.utils.clip_grad_norm_(self.policy.parameters(), 10.)
         self.optimizer.step()
-        # print(self.policy.mu_head[0].weight)
         converged = False
-        return alpha, loss, converged
+        return self.alpha, loss, converged
 
     def _alpha_update(self, alpha, use_time_alpha=False):
         # aka update alpha
