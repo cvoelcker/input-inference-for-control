@@ -189,7 +189,7 @@ class ParticleI2cGraph():
         self.M = M
         self.u_samples = u_samples
         self.num_f_p = self.num_p//self.u_samples
-        self.alpha = torch.tensor([np.log(1e-2)], requires_grad=True)
+        self.alpha = torch.tensor([np.log(alpha_init)], requires_grad=True)
 
         self.mu_x0 = mu_x0
         self.mu_u0 = mu_u0

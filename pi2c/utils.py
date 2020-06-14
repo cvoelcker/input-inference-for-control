@@ -3,8 +3,9 @@ import datetime
 from distutils.spawn import find_executable
 import numpy as np
 import os
+from sys import argv
 import time
-from abc import ABC, abstractmethod
+from config_parser import config_parser
 
 import matplotlib.pyplot as plt
 
@@ -158,6 +159,13 @@ def configure_plots():
     if find_executable("latex"):
         matplotlib.rcParams['text.usetex'] = True
         matplotlib.rcParams['text.latex.unicode'] = True
+
+
+# particle experiments argparser
+def get_particle_i2c_config(args, config_file):
+    parser = config_parser.ConfigGenerator(config_file)
+    parsed = parser(args)
+    return parsed
 
 
 class GaussianPrior():
