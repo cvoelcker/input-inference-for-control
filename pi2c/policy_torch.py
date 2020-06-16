@@ -38,9 +38,9 @@ class Policy(nn.Module):
 
 
 class LogLinearPolicy(nn.Module):
-    def __init__(self, inp_dim, out_dim, var_init):
+    def __init__(self, inp_dim, out_dim, var_init, offset=0.5):
         super().__init__()
-        self.p = Policy(inp_dim, out_dim, var_init)
+        self.p = Policy(inp_dim, out_dim, var_init, 'log', 'linear', [], offset)
 
     def forward(self, x, n):
         return self.p(x, n)

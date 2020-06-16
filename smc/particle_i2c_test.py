@@ -62,9 +62,11 @@ if __name__ == "__main__":
     alpha_over_run = []
     sys.init_env()
     # alpha = particle_graph.run(alpha, False, 1)
-    for i in range(1000):
+    for i in range(27):
         sys.init_env()
-        alpha = particle_graph.run(alpha, i + 1, False, 2, log_dir)
+        particle_graph.run(alpha, i + 1, False, 2, log_dir)
+        alpha = particle_graph.estimate_alpha(50, 100)
+        particle_graph.alpha = alpha
         
         print('Updated graph {}, new alpha {}'.format(i, alpha))
 

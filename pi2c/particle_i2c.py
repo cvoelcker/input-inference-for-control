@@ -56,7 +56,7 @@ class ParticleI2cCell(nn.Module):
         self.strategy = 'greedy'
 
         # build broad EM prior
-        self.xu_joint = LogLinearPolicy(self.sys.dim_x, self.sys.dim_u, 10.)
+        self.xu_joint = LogLinearPolicy(self.sys.dim_x, self.sys.dim_u, 10., 0.01)
         # self.xu_joint = policy
 
         self.u_samples = u_samples
@@ -96,7 +96,7 @@ class ParticleI2cCell(nn.Module):
         self.samples = samples//self.u_samples
         self.log_weights = log_weights[samples].squeeze()
         self.particles = torch.cat([particles, new_u], 1)[samples]
-        self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
+        self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T.detach()
         assert not torch.any(torch.isnan(self.new_particles)), particles
         return self.new_particles, self.particles, failed
 
@@ -122,7 +122,7 @@ class ParticleI2cCell(nn.Module):
         else:
             raise ValueError('Strategy unknown')
 
-    def backward(self, samples, weights):
+    def backward_pass(self, samples, weights):
         if self.strategy == 'greedy':
             return self.greedy_backward_reweighing(samples, weights)
         elif self.strategy == 'smoothing':
@@ -225,7 +225,7 @@ class ParticleI2cGraph():
 
     def run(self, init_alpha, it, use_time_alpha=False, max_iter=1000, log_dir='log/'):
         _iter = 0
-        max_iter = 1000
+        max_iter = 10000
         losses = []
         for _iter in tqdm(range(max_iter)):
             weights = self._expectation(_iter, use_time_alpha)
@@ -234,7 +234,6 @@ class ParticleI2cGraph():
         np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
         for c in self.cells:
             c.save_state('{}/model_state_{}_'.format(log_dir, self.log_id) + '{}.torch')
-        
         self.log_id += 1
         return next_alpha
 
@@ -249,20 +248,31 @@ class ParticleI2cGraph():
         all_weights = []
         # run per cell loop
         for i in range(self.num_runs):
-            particles = self.x0_dist.sample(self.num_p//self.u_samples)
-            particles = torch.Tensor(particles)
-            failed = False
-            for c in self.cells:
-                particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(self.alpha), use_time_alpha)
+            samples = self.simulate_forward(self.alpha)
             weights = self.cells[-1].log_weights
-            samples = particles
-            for c in reversed(self.cells):
-                samples, weights = c.backward_smoothing(samples, weights.detach())
-                all_weights.append(torch.logsumexp(c.log_weights, 0))
+            all_weights = self.simulate_backwards(samples, weights)
+        return all_weights
+
+    def simulate_forward(self, alpha):
+        particles = self.x0_dist.sample(self.num_p//self.u_samples)
+        particles = torch.Tensor(particles)
+        failed = False
+        iteration = 0
+        for c in self.cells:
+            particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(alpha), False)
+        return particles
+
+    def simulate_backwards(self, samples, weights):
+        all_weights = []
+        samples = np.arange(len(samples))
+        for c in reversed(self.cells):
+            samples, weights = c.backward_pass(samples, weights.detach())
+            all_weights.append(torch.logsumexp(c.log_weights, 0))
         return all_weights
         
     def _maximization(self, weights, use_time_alpha=False):
         ## JOINT UPDATE
+        self.optimizer.zero_grad()
         loss = torch.stack(weights)
         loss = -torch.sum(loss)
         loss.backward()
@@ -271,6 +281,21 @@ class ParticleI2cGraph():
         self.optimizer.step()
         converged = False
         return self.alpha, loss, converged
+
+    def estimate_alpha(self, proposals, rounds):
+        with torch.no_grad():
+            alpha_proposals = torch.distributions.Normal(self.alpha, 0.5).sample((proposals, )).flatten()
+            proposal_weights = []
+            for i, alpha in enumerate(tqdm(alpha_proposals)):
+                proposal_weights.append([])
+                for j in range(rounds):
+                    weights = self._expectation(None)
+                    weights = torch.stack(weights).flatten()
+                    weights = torch.mean(weights, 0)
+                    proposal_weights[i].append(weights)
+        proposal_weights = [torch.mean(torch.tensor(proposal_weights[i])) for i in range(proposals)]
+        i = np.argmax(proposal_weights)
+        return alpha_proposals[i]
 
     def _alpha_update(self, alpha, use_time_alpha=False):
         # aka update alpha
