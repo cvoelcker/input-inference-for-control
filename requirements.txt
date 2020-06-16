@@ -10,3 +10,4 @@ dill==0.3.0
 tqdm
 jax
 torch
+PyConfigMaker

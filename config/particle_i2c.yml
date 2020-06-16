@@ -1,0 +1,40 @@
+ENVIRONMENT:
+    env_name: LinearDisturbed # the environment name, needs to map
+    transition_noise: 0.001 # the variance of the transition noise
+    init_state_mean: # mean of the initial state, sampled from a uncorrelated Gaussian
+        - 5.
+        - 5.
+    init_state_var: 0.1 # variance of the initial state vector
+    init_state_bimodal: False # boolean flag for bimodal initial state experiments
+    init_state_bimodal_mean_offset: -10. # offset on state vector mean for bimodal experiments
+    horizon: 100 # control horizon
+    cost:
+        shape: quadratic # currently, only quadratic cost functions are implemened
+        Q: 10.
+        R: 1.
+
+
+POLICY:
+    type: VSMC # choice: VSMC|mixture|KDE
+    smoothing: greedy # choise greedy|doucet
+    init_policy_variance: 1. # initial variance of p(u|x)
+    init_policy_mean: 0. # initial mean of p(u|x)
+    components: 1 # number of components for mixture policies
+
+GRAPH:
+    num_particles: 100 # number of particles passed at each timestep
+    num_policy_samples: 10 # number of policy proposals sampled for each particle
+    num_backwards: 100 # number of particles sampled for backward smoothing (maximum is number of forward particles)
+    init_alpha: 0.0001 # initial value for the alpha temperature parameter
+
+OPTIMIZER:
+    optimizer: adam
+    lr: 0.001
+    gradient_norm: 100
+            
+LOGGING:
+    em_steps: 250000 # total number of EM steps (for LQ choose 250000 for VSMC, 500 for mixture models)
+    log_every: 1000 # plotting intervall
+    eval_controler: False # evaluate optimal control at every step
+    plot_forward_backward: False # only really meaningful for mixture models, in VSMC difference in one pass is tiny
+
