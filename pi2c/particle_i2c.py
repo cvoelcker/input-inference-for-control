@@ -277,12 +277,13 @@ class ParticleI2cGraph():
         for _iter in tqdm(range(max_iter)):
             weights = self._expectation(_iter)
             loss, converged = self._maximization(weights)
+            #TODO: Insert alpha update here
             losses.append(loss.detach().numpy())
         np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
         for c in self.cells:
             c.save_state('{}/model_state_{}_'.format(log_dir, self.log_id) + '{}.torch')
         self.log_id += 1
-        return next_alpha
+        return self.alpha
 
     def _expectation(self, iteration):
         """Runs the forward, backward smoothing algorithm to estimate the

@@ -1,6 +1,7 @@
 import sys
 from collections import namedtuple
 
+from tqdm import tqdm
 import numpy as np
 
 from pi2c.env import make_env
@@ -64,14 +65,14 @@ def build_logger(graph, config):
 
 if __name__ == "__main__":
     config = get_particle_i2c_config(sys.argv[1:], 'config/particle_i2c.yml')
-    print(config)
     log_dir = config.LOGGING.log_dir
     graph, env, cost = build_experiment(config)
     logger = build_logger(graph, None)
 
-    for i in range(1000):
+    steps_per_log = config.LOGGING.log_every
+    epochs = config.LOGGING.em_steps // steps_per_log
+
+    for i in tqdm(range(epochs)):
         env.init_env()
-        graph.run(i, 100, log_dir)
+        graph.run(i, steps_per_log, log_dir)
         #TODO: call logger here
-        
-        print('Updated graph {}, new alpha {}'.format(i, alpha))
