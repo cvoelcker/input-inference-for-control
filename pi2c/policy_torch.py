@@ -3,6 +3,11 @@ from torch import nn
 from torch.distributions import Normal
 
 
+def get_policy(policy_type, inp_dim, out_dim, var_init, params):
+    if policy_type == 'LogLinear':
+        return LogLinearPolicy(inp_dim, out_dim, var_init)
+
+
 def init_weights(m):
     if type(m) == nn.Linear:
         m.weight.data.fill_(0.0)
@@ -37,22 +42,30 @@ class Policy(nn.Module):
         return mu + samples * var
 
 
-class LogLinearPolicy(nn.Module):
-    def __init__(self, inp_dim, out_dim, var_init, offset=0.5):
+class PolicyWrapper(nn.Module):
+    def __init__(self):
         super().__init__()
-        self.p = Policy(inp_dim, out_dim, var_init, 'log', 'linear', [], offset)
 
     def forward(self, x, n):
         return self.p(x, n)
 
 
-class SquareLinearPolicy(nn.Module):
+class LogLinearPolicy(PolicyWrapper):
+    def __init__(self, inp_dim, out_dim, var_init):
+        super().__init__()
+        self.p = Policy(inp_dim, out_dim, var_init)
+
+
+class LogMlpPolicy(PolicyWrapper):
+    def __init__(self, inp_dim, out_dim, var_init, layers=tuple()):
+        super().__init__()
+        self.p = Policy(inp_dim, out_dim, var_init, var_strategy='log', mu_strategy='linear', layers=layers)
+
+
+class SquareLinearPolicy(PolicyWrapper):
     def __init__(self, inp_dim, out_dim, var_init):
         super().__init__()
         self.p = Policy(inp_dim, out_dim, var_init, var_strategy='square')
-
-    def forward(self, x, n):
-        return self.p(x, n)
 
 
 class MlpMu(nn.Module):

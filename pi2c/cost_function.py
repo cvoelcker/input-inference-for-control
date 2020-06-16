@@ -81,7 +81,6 @@ class Cost2Prob():
         costs = c.reshape(-1,1) # unnormalized log probabilities
         samples = Gumbel(loc=0., scale=1.).sample((x.shape[0],n))
         log_gumbel = alpha * costs + samples
-        assert torch.all(torch.isfinite(log_gumbel))
         _, choices = torch.max(log_gumbel, 0)
         return choices, costs
     
