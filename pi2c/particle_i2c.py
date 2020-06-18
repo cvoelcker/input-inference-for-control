@@ -283,8 +283,11 @@ class ParticleI2cGraph():
             update_alpha = _iter == (max_iter-1)
             alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
             if update_alpha:
-                print(alpha)
-                self.alpha = alpha
+                #TODO: Find out why the sign error exists
+                print()
+                print()
+                print(self.alpha)
+                self.alpha = -alpha
             losses.append(loss.detach().numpy())
         np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
         for c in self.cells:

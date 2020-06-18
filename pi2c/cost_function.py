@@ -96,7 +96,7 @@ class Cost2Prob():
         samples = Gumbel(loc=0., scale=1.).sample((x.shape[0],n))
         log_gumbel = alpha * costs + samples
         _, choices = torch.max(log_gumbel, 0)
-        return choices, alpha*costs
+        return choices, costs
 
     def cost_jax(self, x):
         return self.c.cost_jax(x)
