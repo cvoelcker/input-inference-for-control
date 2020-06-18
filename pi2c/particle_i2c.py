@@ -213,7 +213,6 @@ class ParticleI2cGraph():
         self.num_u_samples = num_u_samples
         self.num_f_p = self.num_p * self.num_u_samples
         self.alpha = alpha_init
-        print(self.alpha)
 
         self.mu_x0 = mu_x0
         self.sig_x0 = sig_x0
@@ -284,6 +283,7 @@ class ParticleI2cGraph():
             update_alpha = _iter == (max_iter-1)
             alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
             if update_alpha:
+                print(alpha)
                 self.alpha = alpha
             losses.append(loss.detach().numpy())
         np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
@@ -340,8 +340,10 @@ class ParticleI2cGraph():
                     logsumexp_weights.append(torch.logsumexp(w, 0))
             loss, converged = self._vsmc_maximization(logsumexp_weights)
             np_particles = torch.cat(particles).detach().numpy()
-            alpha = self._score_matching_alpha_update(np_particles)
-            print(alpha)
+            if update_alpha:
+                alpha = self._score_matching_alpha_update(np_particles)
+            else:
+                alpha = None
             return alpha, loss, converged
         
     def _vsmc_maximization(self, weights):
