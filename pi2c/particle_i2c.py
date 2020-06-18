@@ -420,7 +420,13 @@ class ParticleI2cGraph():
             return alpha_update, np.isclose(alpha, alpha_update)
     
     def _score_matching_alpha_update(self, x, weights):
-        weights = np.exp(weights-np.min(weights))
+        print()
+        print()
+        print(weights.shape)
+        weights = jax.nn.softmax(weights)
+        print(x.shape)
+        print(weights.shape)
+        print(weights)
         alpha = score_matching(self.cost.cost_jax, x, weights)
         return alpha
     

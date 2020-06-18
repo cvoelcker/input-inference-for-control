@@ -65,7 +65,7 @@ def build_logger(graph, config):
 
 if __name__ == "__main__":
     config = get_particle_i2c_config(sys.argv[1:], 'config/particle_i2c.yml')
-    log_dir = config.LOGGING.log_dir
+    log_dir = 'logging/' + config.LOGGING.log_dir
     graph, env, cost = build_experiment(config)
     logger = build_logger(graph, None)
 

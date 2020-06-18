@@ -23,7 +23,7 @@ POLICY:
 
 GRAPH:
     num_particles: 100 # number of particles passed at each timestep
-    num_policy_samples: 10 # number of policy proposals sampled for each particle
+    num_policy_samples: 2 # number of policy proposals sampled for each particle
     num_backwards: 100 # number of particles sampled for backward smoothing (maximum is number of forward particles)
     init_alpha: 0.0001 # initial value for the alpha temperature parameter
 
