@@ -321,7 +321,7 @@ class ParticleI2cGraph():
         failed = False
         iteration = 0
         for c in self.cells:
-            particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(alpha))
+            particles, sampled, failed = c.forward_pass(particles, iteration, failed, alpha)
             all_particles.append(sampled)
         return particles, torch.cat(all_particles)
 
@@ -342,12 +342,13 @@ class ParticleI2cGraph():
                 for w in batch:
                     logsumexp_weights.append(torch.logsumexp(w, 0))
             loss, converged = self._vsmc_maximization(logsumexp_weights)
-            np_particles = torch.cat(particles).detach().numpy()
             if update_alpha:
-                alpha = self._score_matching_alpha_update(np_particles)
+                np_particles = torch.cat(particles).detach().numpy()
+                np_weights = torch.cat(particles).detach().numpy()
+                alpha = self._score_matching_alpha_update(np_particles, np_weights)
+                return alpha, loss, converged
             else:
-                alpha = None
-            return alpha, loss, converged
+                return None, loss, converged
         
     def _vsmc_maximization(self, weights):
         ## JOINT UPDATE
@@ -418,8 +419,9 @@ class ParticleI2cGraph():
             print('New alpha {}'.format(alpha_update))
             return alpha_update, np.isclose(alpha, alpha_update)
     
-    def _score_matching_alpha_update(self, x):
-        alpha = score_matching(self.cost.cost_jax, x)
+    def _score_matching_alpha_update(self, x, weights):
+        weights = np.exp(weights-np.min(weights))
+        alpha = score_matching(self.cost.cost_jax, x, weights)
         return alpha
     
     def check_alpha_converged(self):
