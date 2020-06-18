@@ -37,6 +37,7 @@ from pi2c.utils import converged_list, finite_horizon_lqr, GaussianPrior
 from pi2c.jax_gmm import GMM
 from pi2c.cost_function import Cost2Prob
 from pi2c.policy_torch import get_policy
+from pi2c.score_matching import score_matching
 
 
 # abstract over numerical functions for different backends
@@ -212,6 +213,7 @@ class ParticleI2cGraph():
         self.num_u_samples = num_u_samples
         self.num_f_p = self.num_p * self.num_u_samples
         self.alpha = alpha_init
+        print(self.alpha)
 
         self.mu_x0 = mu_x0
         self.sig_x0 = sig_x0
@@ -253,7 +255,6 @@ class ParticleI2cGraph():
             self.optimizer = optim.Adam(
                     [{'params': c.policy.parameters()} for c in self.cells
                      ], lr=self.lr)
-            self._alpha = torch.tensor([self.alpha])
             self.alpha_update = 'heuristic'
         if strategy == 'em':
             self.alpha_update = 'quadratic'
@@ -271,13 +272,19 @@ class ParticleI2cGraph():
         # self.sigXi0 = np.linalg.inv(self.cost.QR)
         self.env_ready = True
 
+    @property
+    def _alpha(self):
+        return torch.tensor([float(self.alpha)])
+
     def run(self, it, max_iter, log_dir='log/'):
         _iter = 0
         losses = []
         for _iter in tqdm(range(max_iter)):
-            weights = self._expectation(_iter)
-            loss, converged = self._maximization(weights)
-            #TODO: Insert alpha update here
+            weights, particles = self._expectation(_iter)
+            update_alpha = _iter == (max_iter-1)
+            alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
+            if update_alpha:
+                self.alpha = alpha
             losses.append(loss.detach().numpy())
         np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
         for c in self.cells:
@@ -294,21 +301,26 @@ class ParticleI2cGraph():
         """
         # sample initial x from the systems inital distribution
         all_weights = []
+        all_particles = []
         # run per cell loop
         for i in range(self.batch_size):
-            samples = self.simulate_forward(self._alpha)
+            samples, all_samples = self.simulate_forward(self._alpha)
             weights = self.cells[-1].log_weights
-            all_weights.append(self.simulate_backwards(samples, weights))
-        return all_weights
+            weights_backward = self.simulate_backwards(samples, weights)
+            all_particles.append(all_samples)
+            all_weights.append(weights_backward)
+        return all_weights, all_particles
 
     def simulate_forward(self, alpha):
+        all_particles = []
         particles = self.x0_dist.sample(self.num_p)
         particles = torch.Tensor(particles)
         failed = False
         iteration = 0
         for c in self.cells:
             particles, sampled, failed = c.forward_pass(particles, iteration, failed, torch.exp(alpha))
-        return particles
+            all_particles.append(sampled)
+        return particles, torch.cat(all_particles)
 
     def simulate_backwards(self, samples, weights):
         all_weights = []
@@ -320,13 +332,17 @@ class ParticleI2cGraph():
             all_weights.append(c.log_weights)
         return all_weights
 
-    def _maximization(self, weights):
+    def _maximization(self, weights, particles, update_alpha=False):
         if self.policy_type == 'VSMC':
             logsumexp_weights = []
             for batch in weights:
                 for w in batch:
                     logsumexp_weights.append(torch.logsumexp(w, 0))
-            return self._vsmc_maximization(logsumexp_weights)
+            loss, converged = self._vsmc_maximization(logsumexp_weights)
+            np_particles = torch.cat(particles).detach().numpy()
+            alpha = self._score_matching_alpha_update(np_particles)
+            print(alpha)
+            return alpha, loss, converged
         
     def _vsmc_maximization(self, weights):
         ## JOINT UPDATE
@@ -397,132 +413,12 @@ class ParticleI2cGraph():
             print('New alpha {}'.format(alpha_update))
             return alpha_update, np.isclose(alpha, alpha_update)
     
+    def _score_matching_alpha_update(self, x):
+        alpha = score_matching(self.cost.cost_jax, x)
+        return alpha
+    
     def check_alpha_converged(self):
         return False
 
     def get_policy(self, x, i):
         return self.cells[i].policy(x)
-
-
-class ParticlePlotter():
-
-    def __init__(self, particle_i2c):
-        self.graph = particle_i2c
-
-    def build_plot(self, title_pre, fig_name=None):
-        pass
-
-    def plot_particle_forward_backwards_cells(self, dim, dim_name='x', fig=None):
-        """This plots the (subsamled) forward and backward particle clouds
-        for a given dimension with mean and sigma shaded.
-
-        Arguments:
-            dim {int} -- dimension to compute particles over
-
-        Keyword Arguments:
-            fig {plt} -- if fig is given, figure will be used and returned
-            otherwise, cloud is printed directly to screen (default: {None})
-        """
-        if fig is None:
-            # initialize new figure
-            fig, axs = plt.subplots(1)
-
-        f_particles = self.graph.all_f_samples[:, :, dim]
-        b_particles = np.flip(self.graph.all_samples[:, :, dim], 0)
-        
-        time_x_loc_f = np.repeat(np.arange(self.graph.T), f_particles.shape[1])
-        time_x_loc_b = np.repeat(np.arange(self.graph.T), b_particles.shape[1])
-
-        if self.graph.is_multimodal:
-            # TODO: Fix multimodal plotting to be nicer (via the gaussian comp sig)
-            # TODO: Howto get prior after update? Rework code
-            pass
-        
-        mean_f, sig_f, sig_upper_f, sig_lower_f = get_mean_sig_bounds(f_particles, 1, 2)
-        mean_b, sig_b, sig_upper_b, sig_lower_b = get_mean_sig_bounds(b_particles, 1, 2)
-
-        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C0', alpha=.1)
-        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C1', alpha=.1)
-        fig.plot(mean_f, color='C0')
-        fig.plot(mean_b, color='C1')
-        fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01, color='C0')
-        fig.scatter(time_x_loc_b, b_particles.flatten(), 0.01, color='C1')
-
-        fig.set_xlabel('Timestep')
-        fig.set_ylabel(dim_name + str(dim))
-        fig.set_title('Forward/backward particles over ' + dim_name + str(dim))
-        
-        return fig
-
-    def plot_joint_forward_backward_cells(self, dim, fig_name=None):
-        pass
-
-    def eval_controler(self, eval_env, cost, repeats=1000, random_starts=True):
-        costs = []
-        us = []
-        x = eval_env.init_env(randomized=random_starts)
-        print('Evaluating envs for plotting')
-        for i in tqdm(range(repeats)):
-            for i in range(self.graph.T):
-                u = self.graph.get_policy(x.flatten(), i).reshape(-1,1)
-                us.append(u)
-                x = eval_env.forward(u)
-                costs.append(cost(x.flatten(), u))
-        costs = np.array(costs).reshape(repeats, -1)
-        us = np.array(us).reshape(repeats, -1)
-        return costs, us
-
-    def plot_controler(self, eval_env, cost, repeats=1000, random_starts=True, fig=None):
-        if fig is None:
-            fig, ax = plt.subplots(2)
-        else:
-            ax = fig
-
-        plt_help_x = np.arange(self.graph.T)
-        costs, us = self.eval_controler(eval_env, cost, repeats=repeats, random_starts=random_starts)
-        
-        mean_c, sig_c, sig_upper_c, sig_lower_c = get_mean_sig_bounds(costs, 0, 2)
-        mean_u, sig_u, sig_upper_u, sig_lower_u = get_mean_sig_bounds(us, 0, 2)
-        # plot costs
-        ax[0].fill_between(plt_help_x, sig_lower_c, sig_upper_c, color='C0', alpha=0.1)
-        for i in range(repeats):
-            ax[0].plot(costs[i], '--', color='C0', lw=0.5)
-        ax[0].plot(mean_c, 'C0')
-        ax[0].set_xlabel('T')
-        ax[0].set_ylabel('cost')
-        ax[0].set_title('Per timestep cost of several controler evaluations')
-
-        # plot controls
-        ax[1].fill_between(plt_help_x, sig_lower_u, sig_upper_u, color='C1', alpha=0.1)
-        for i in range(repeats):
-            ax[1].plot(us[i], '--', color='C1', lw=0.5)
-        ax[1].plot(mean_u, 'C1')
-        ax[1].set_xlabel('T')
-        ax[1].set_ylabel('u')
-        ax[1].set_title('Per timestep control signal of several controler evaluations')
-
-        return fig, ax
-
-
-    def plot_all(self, run_name, eval_env, cost, repeats=10, random_starts=True):
-        plt.clf()
-        fig, axs = plt.subplots(3)
-        fig.suptitle('Particle I2C training ' + run_name)
-        self.plot_particle_forward_backwards_cells(0, fig=axs[0])
-        self.plot_particle_forward_backwards_cells(1, fig=axs[1])
-        self.plot_particle_forward_backwards_cells(2, 'u',fig=axs[2])
-        fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for suptitle
-        fig.savefig('plots/particles_{}.png'.format(run_name))
-        fig, axs = plt.subplots(2)
-        fig.suptitle('Particle I2C controler evaluation ' + run_name)
-        self.plot_controler(eval_env, cost, repeats, random_starts, fig=axs)
-        fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for uptitle
-        fig.savefig('plots/controler_{}.png'.format(run_name))
-
-
-def get_mean_sig_bounds(arr, dim, sig_multiple=1.):
-    mean_arr = arr.mean(dim)
-    sig_arr = arr.std(dim)
-    sig_upper_arr = mean_arr + sig_arr * sig_multiple
-    sig_lower_arr = mean_arr - sig_arr * sig_multiple
-    return mean_arr, sig_arr, sig_upper_arr, sig_lower_arr

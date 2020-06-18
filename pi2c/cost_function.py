@@ -66,6 +66,20 @@ class StaticQRCost(QRCost):
         R_cost = torch.diag(_u @ self.R @ _u.T)
         return -(Q_cost + R_cost)
 
+    def cost_jax(self, x):
+        """Replicates the cost function to enable jax differentiation
+        jax maps vectorized functions explicitely, so the cost function
+        assumes a single vector x
+
+        Args:
+            x (np.array): the concatenated state control vector
+
+        Returns:
+            float: quadratic cost
+        """
+        x = x.reshape(1, -1)
+        return -(x @ self.QR.numpy() @ x.T)[0,0]
+
 
 class Cost2Prob():
     def __init__(self, cost):
@@ -83,6 +97,9 @@ class Cost2Prob():
         log_gumbel = alpha * costs + samples
         _, choices = torch.max(log_gumbel, 0)
         return choices, costs
+
+    def cost_jax(self, x):
+        return self.c.cost_jax(x)
     
     def __call__(self, x, u, alpha=1., xg=None, ug=None):
         return self.likelihood(x, u, alpha, xg, ug)

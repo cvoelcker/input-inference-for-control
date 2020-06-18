@@ -7,7 +7,7 @@ import numpy as np
 from pi2c.env import make_env
 from pi2c.model import make_env_model
 from pi2c.cost_function import QRCost, StaticQRCost, Cost2Prob
-from pi2c.particle_i2c import ParticleI2cGraph, ParticlePlotter
+from pi2c.particle_i2c import ParticleI2cGraph#, ParticlePlotter
 from pi2c.utils import get_particle_i2c_config
 
 
