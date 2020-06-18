@@ -344,7 +344,7 @@ class ParticleI2cGraph():
             loss, converged = self._vsmc_maximization(logsumexp_weights)
             if update_alpha:
                 np_particles = torch.cat(particles).detach().numpy()
-                np_weights = torch.cat(particles).detach().numpy()
+                np_weights = np.concatenate([jax.nn.softmax(w.detach().numpy()) for w in weights[0]])
                 alpha = self._score_matching_alpha_update(np_particles, np_weights)
                 return alpha, loss, converged
             else:
@@ -420,14 +420,7 @@ class ParticleI2cGraph():
             return alpha_update, np.isclose(alpha, alpha_update)
     
     def _score_matching_alpha_update(self, x, weights):
-        print()
-        print()
-        print(weights.shape)
-        weights = jax.nn.softmax(weights)
-        print(x.shape)
-        print(weights.shape)
-        print(weights)
-        alpha = score_matching(self.cost.cost_jax, x, weights)
+        alpha = score_matching(self.cost.cost_jax, x, weights.reshape(-1,1))
         return alpha
     
     def check_alpha_converged(self):
