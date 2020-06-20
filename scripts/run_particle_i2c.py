@@ -1,4 +1,5 @@
 import sys
+import os
 from collections import namedtuple
 
 from tqdm import tqdm
@@ -66,6 +67,8 @@ def build_logger(graph, config):
 if __name__ == "__main__":
     config = get_particle_i2c_config(sys.argv[1:], 'config/particle_i2c.yml')
     log_dir = 'logging/' + config.LOGGING.log_dir
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
     graph, env, cost = build_experiment(config)
     logger = build_logger(graph, None)
 
@@ -74,5 +77,5 @@ if __name__ == "__main__":
 
     for i in tqdm(range(epochs)):
         env.init_env()
-        graph.run(i, steps_per_log, log_dir)
+        graph.run(i, steps_per_log, log_dir, config.ENVIRONMENT.init_state_bimodal)
         #TODO: call logger here

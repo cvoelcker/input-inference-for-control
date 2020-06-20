@@ -6,7 +6,6 @@ ENVIRONMENT:
         - 5.
     init_state_var: 0.1 # variance of the initial state vector
     init_state_bimodal: False # boolean flag for bimodal initial state experiments
-    init_state_bimodal_mean_offset: -10. # offset on state vector mean for bimodal experiments
     horizon: 100 # control horizon
     cost:
         shape: quadratic # currently, only quadratic cost functions are implemened

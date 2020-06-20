@@ -188,7 +188,7 @@ class ParticleI2cCell(nn.Module):
         torch.save(self.policy, save_path.format(self.i))
 
     def load_state(self, save_path):
-        self.policy = torch.load(save_path.format(i))
+        self.policy = torch.load(save_path.format(self.i))
 
 
 class ParticleI2cGraph():
@@ -275,11 +275,11 @@ class ParticleI2cGraph():
     def _alpha(self):
         return torch.tensor([float(self.alpha)])
 
-    def run(self, it, max_iter, log_dir='log/'):
+    def run(self, it, max_iter, log_dir='log/', run_bimodal_exp=False):
         _iter = 0
         losses = []
         for _iter in tqdm(range(max_iter)):
-            weights, particles = self._expectation(_iter)
+            weights, particles = self._expectation(_iter, run_bimodal_exp)
             update_alpha = _iter == (max_iter-1)
             alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
             if update_alpha:
@@ -295,7 +295,7 @@ class ParticleI2cGraph():
         self.log_id += 1
         return self.alpha
 
-    def _expectation(self, iteration):
+    def _expectation(self, iteration, run_bimodal_exp):
         """Runs the forward, backward smoothing algorithm to estimate the
         current optimal state action trajectory
         
@@ -307,16 +307,21 @@ class ParticleI2cGraph():
         all_particles = []
         # run per cell loop
         for i in range(self.batch_size):
-            samples, all_samples = self.simulate_forward(self._alpha)
+            samples, all_samples = self.simulate_forward(self._alpha, run_bimodal_exp)
             weights = self.cells[-1].log_weights
             weights_backward = self.simulate_backwards(samples, weights)
             all_particles.append(all_samples)
             all_weights.append(weights_backward)
         return all_weights, all_particles
 
-    def simulate_forward(self, alpha):
+    def simulate_forward(self, alpha, run_bimodal_exp):
         all_particles = []
-        particles = self.x0_dist.sample(self.num_p)
+        if run_bimodal_exp:
+            particles_pos = self.x0_dist.sample(self.num_p//2)
+            particles_neg = -self.x0_dist.sample(self.num_p//2)
+            particles = np.concatenate((particles_pos, particles_neg), 0)
+        else:
+            particles = self.x0_dist.sample(self.num_p)
         particles = torch.Tensor(particles)
         failed = False
         iteration = 0
