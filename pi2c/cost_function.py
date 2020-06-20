@@ -1,12 +1,17 @@
 import numpy as np
 from abc import ABC, abstractmethod
 
+# import jax.numpy as np
+from jax.random import PRNGKey, gumbel
+from jax import vmap
+
 import torch
 from torch.distributions import Gumbel
 
 class EnvCostFunction(ABC):
     normalized = False
     constant_goal = False
+    torch = True
 
     @abstractmethod
     def _cost(self, x, u, xg, ug):
@@ -19,7 +24,11 @@ class EnvCostFunction(ABC):
             return self._cost(x, u, xg, ug)
 
     def __call__(self, x, u, xg=None, ug=None):
-        return self.cost(x, u, xg, ug)
+        if self.torch:
+            return self.cost(x, u, xg, ug)
+        else:
+            x = np.concatenate((x, u), 1)
+            return self.cost_jax_(x)
 
 
 class QRCost(EnvCostFunction):
@@ -80,12 +89,26 @@ class StaticQRCost(QRCost):
         x = x.reshape(1, -1)
         return -(x @ self.QR.numpy() @ x.T)[0,0]
 
+    def cost_jax_(self, x):
+        """Replicates the cost function to enable jax differentiation
+        jax maps vectorized functions explicitely, so the cost function
+        assumes a single vector x
+
+        Args:
+            x (np.array): the concatenated state control vector
+
+        Returns:
+            float: quadratic cost
+        """
+        return -np.diag(x @ self.QR.numpy() @ x.T)
+
 
 class Cost2Prob():
-    def __init__(self, cost):
+    def __init__(self, cost, backend='torch'):
         self.normalized = cost.normalized
         self.constant_goal = cost.constant_goal
         self.c = cost
+        self.key = PRNGKey(0)
 
     def likelihood(self, x, u, alpha=1., xg=None, ug=None):
         return np.exp(alpha * self.c.cost(x, u, xg, ug))
@@ -99,7 +122,15 @@ class Cost2Prob():
         return choices, alpha*costs
 
     def cost_jax(self, x):
-        return self.c.cost_jax(x)
+        return self.c.cost_jax_(x)
+
+    def log_sample_jax(self, x, u, n, alpha=1, xg=None, ug=None):
+        x = np.concatenate((x,u), 1)
+        c = vmap(self.c.cost_jax)(x)
+        costs = c.reshape(-1,1)
+        samples = gumbel(self.key, (costs.shape[0], n))
+        choices = np.argmax(samples + alpha * costs, 0)
+        return choices, alpha * costs
     
     def __call__(self, x, u, alpha=1., xg=None, ug=None):
         return self.likelihood(x, u, alpha, xg, ug)

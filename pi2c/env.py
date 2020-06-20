@@ -3,6 +3,7 @@ Environments to control
 """
 import matplotlib.pyplot as plt
 import numpy as np
+from jax import random
 import scipy as sc
 import os
 
@@ -104,7 +105,7 @@ class LinearSim(env_def.LinearDef, BaseSim):
         self.x = x.reshape(self.x.shape)
         return self.x
 
-class LinearDisturbed(env_def.LinearDef, BaseSim):
+class TorchLinearDisturbed(env_def.LinearDef, BaseSim):
 
     def __init__(self, duration):
         self.duration = duration
@@ -128,6 +129,30 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         _x = self.A @ x0 + self.B @ u + self.a
         mu = _x - x1
         return self.normal.log_prob(mu.T)
+
+class LinearDisturbed(env_def.LinearDef, BaseSim):
+
+    def __init__(self, duration):
+        self.duration = duration
+        self.a = self.a.reshape((-1, 1)) # give me strength...
+        self.sig_x_noise = 0.0001
+        self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
+        self.key = random.PRNGKey(0)
+
+    def init_env(self, randomized=False):
+        self.x = np.copy(self.x0)
+        return self.x
+
+    def forward(self, u):
+        self.key, sk = random.split(self.key)
+        x = self.A @ self.x + self.B @ u + self.a
+        r = random.normal(sk, x.shape) * self.sig_x_noise
+        return x + r
+
+    def log_likelihood(self, x0, u, x1):
+        _x = self.A @ x0 + self.B @ u + self.a
+        mu = _x - x1
+        return self.noise_pdf.logpdf(mu.T)
 
 class PendulumKnown(env_def.PendulumKnown, BaseSim):
 

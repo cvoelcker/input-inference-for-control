@@ -4,7 +4,7 @@ ENVIRONMENT:
     init_state_mean: # mean of the initial state, sampled from a uncorrelated Gaussian
         - 5.
         - 5.
-    init_state_var: 0.1 # variance of the initial state vector
+    init_state_var: 0.001 # variance of the initial state vector
     init_state_bimodal: False # boolean flag for bimodal initial state experiments
     horizon: 100 # control horizon
     cost:
@@ -18,7 +18,7 @@ POLICY:
     nn_type: LogLinear
     init_policy_variance: 1. # initial variance of p(u|x)
     init_policy_mean: 0. # initial mean of p(u|x)
-    components: 1 # number of components for mixture policies
+    components: 2 # number of components for mixture policies
 
 GRAPH:
     num_particles: 100 # number of particles passed at each timestep

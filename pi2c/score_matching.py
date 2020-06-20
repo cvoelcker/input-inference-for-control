@@ -18,5 +18,5 @@ def diag_hessian(f, x):
 def score_matching(f, x, weights):
     grads = jax.vmap(gradient(f))(x)
     quad_grads = diag_hessian(f, x)
-    alpha = np.sum(weights * quad_grads)/np.sum(weights * (grads ** 2))
+    alpha = np.sum(weights * -quad_grads)/np.sum(weights * (grads ** 2))
     return alpha

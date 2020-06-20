@@ -8,6 +8,7 @@ import numpy as np
 from pi2c.env import make_env
 from pi2c.model import make_env_model
 from pi2c.cost_function import QRCost, StaticQRCost, Cost2Prob
+import pi2c.particle_i2c
 from pi2c.particle_i2c import ParticleI2cGraph#, ParticlePlotter
 from pi2c.utils import get_particle_i2c_config
 
@@ -54,8 +55,11 @@ def build_experiment(config):
     graph.set_env(env, cost)
     graph.set_policy(config.POLICY.type, config.POLICY.smoothing, config.POLICY)
     if config.POLICY.type == 'VSMC':
+        pi2c.particle_i2c.BACKEND = 'torch'
         graph.set_optimizer('gradient', config.OPTIMIZER.batch_size, config.OPTIMIZER.gradient_norm, config.OPTIMIZER.lr)
-    # graph.set_logging(config.LOGGING)
+    elif config.POLICY.type == 'mixture':
+        pi2c.particle_i2c.BACKEND = 'jax'
+        graph.set_optimizer('em', config.OPTIMIZER.batch_size)
     return graph, env, cost
 
 
