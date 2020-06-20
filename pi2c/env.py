@@ -90,10 +90,10 @@ class LinearSim(env_def.LinearDef, BaseSim):
 
     def __init__(self, duration):
         self.duration = duration
-        self.a = self.a.reshape((-1,1)) # give me strength... # sorry Joe
+        self.a = self.a.reshape((-1)) # give me strength... # sorry Joe
 
     def init_env(self):
-        self.x = np.copy(self.x0)
+        self.x = np.copy(self.x0).squeeze()
         return self.x
 
     def forward(self, u):
