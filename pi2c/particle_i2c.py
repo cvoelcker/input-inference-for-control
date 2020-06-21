@@ -149,6 +149,8 @@ class ParticleI2cCell(nn.Module):
         elif self.strategy == 'mixture':
             self.particles = np.concatenate((particles, new_u), 1)[samples]
         self.new_particles = self.env.sample(particles[samples].T, new_u[samples].T).T
+        print(self.particles.mean(0))
+        print(self.policy.log_likelihood(self.particles).mean())
         return self.new_particles, self.particles, failed
 
     def greedy_backward_reweighing(self, particles, samples, weights):
@@ -205,6 +207,7 @@ class ParticleI2cCell(nn.Module):
     def update_policy(self, particles, weights):
         """
         """
+        print('\n'* 5)
         resampled_particles = []
         for p, w in zip(particles, weights):
             self.key, sk = random.split(self.key)
@@ -212,6 +215,7 @@ class ParticleI2cCell(nn.Module):
             choices = np.argmax(samples + w.reshape(-1,1), 0)
             resampled_particles.append(np.take(p, choices, 0))
         resampled_particles = np.concatenate(resampled_particles, 0)
+        print(resampled_particles)
         self.policy.update_parameters(resampled_particles, np.zeros_like(resampled_particles[:, 1]))
 
     def current_backward_costs(self):

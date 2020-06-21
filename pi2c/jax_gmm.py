@@ -223,6 +223,7 @@ class GMM:
         weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
         weights = vmap(weight_func)(x)
         weights += 1e-20
+        # print(weights)
         weights = (weights/np.sum(weights,1).reshape(-1,1))
         mu = np.stack(
             [empirical_mu(x, (weights[:,i] * np.exp(particle_weights)).reshape(-1,1)) 
@@ -237,7 +238,7 @@ class GMM:
         self._pi = self._smoothed_avg(self._pi, weights.sum(0)/weights.sum(), alpha)
         self._mu =  self._smoothed_avg(self._mu, mu, alpha)
         self._var = self._smoothed_avg(self._var, n_cov, alpha)
-        # print(self._var)
+        print(self._var)
         assert not np.any(np.isnan(self._mu))
         return converged
 
