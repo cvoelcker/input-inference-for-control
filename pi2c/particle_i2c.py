@@ -210,7 +210,7 @@ class ParticleI2cCell(nn.Module):
             self.key, sk = random.split(self.key)
             samples = random.gumbel(sk, (len(p), len(p)))
             choices = np.argmax(samples + w.reshape(-1,1), 0)
-            resampled_particles.append(p[choices])
+            resampled_particles.append(np.take(p, choices, 0))
         resampled_particles = np.concatenate(resampled_particles, 0)
         self.policy.update_parameters(resampled_particles, np.zeros_like(resampled_particles[:, 1]))
 
@@ -349,8 +349,8 @@ class ParticleI2cGraph():
         for i in tqdm(range(self.batch_size)):
             samples, all_samples = self.simulate_forward(self._alpha, run_bimodal_exp)
             final_weights = self._alpha * self.cost(samples, np.zeros((self.num_p, 1)))
-            weights_backward = self.simulate_backwards(samples, final_weights)
-            all_particles.append(all_samples)
+            weights_backward, particles_backward = self.simulate_backwards(samples, final_weights)
+            all_particles.append(particles_backward)
             all_weights.append(weights_backward)
         return all_weights, all_particles
 
@@ -375,10 +375,12 @@ class ParticleI2cGraph():
         all_weights = []
         samples = tuple(np.arange(len(samples)))
         particles = self.cells[-1].new_particles
+        all_particles = []
         for c in reversed(self.cells):
             particles, samples, weights = c.backward_pass(particles, samples, weights)
+            all_particles.append(particles)
             all_weights.append(c.log_weights)
-        return all_weights
+        return all_weights, all_particles
 
     def _maximization(self, weights, particles, update_alpha=False):
         if self.policy_type == 'VSMC':
@@ -397,9 +399,9 @@ class ParticleI2cGraph():
                 return None, loss, converged
         if self.policy_type == 'mixture':
             particles = np.array(particles)
-            weights = (np.array(weights) - np.max(weights, -1).reshape(*np.array(weights).shape[:2], 1))
-            weights = np.flip(weights, 1)
-            for i, c in tqdm(list(enumerate(self.cells))):
+            # weights = np.array(weights) - np.max(weights, -1, keepdims=True)
+            weights = np.array(weights)
+            for i, c in tqdm(list(enumerate(reversed(self.cells)))):
                 c.update_policy(particles[:, i], weights[:, i])
             if update_alpha:
                 np_particles = np.concatenate(np.concatenate(particles, -2), 0)
