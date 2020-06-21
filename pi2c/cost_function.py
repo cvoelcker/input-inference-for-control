@@ -2,7 +2,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 # import jax.numpy as np
-from jax.random import PRNGKey, gumbel
+from jax.random import PRNGKey, gumbel, split
 from jax import vmap
 
 import torch
@@ -108,7 +108,12 @@ class Cost2Prob():
         self.normalized = cost.normalized
         self.constant_goal = cost.constant_goal
         self.c = cost
-        self.key = PRNGKey(0)
+        self._key = PRNGKey(0)
+
+    @property
+    def key(self):
+        self._key, sk = split(self._key)
+        return sk
 
     def likelihood(self, x, u, alpha=1., xg=None, ug=None):
         return np.exp(alpha * self.c.cost(x, u, xg, ug))

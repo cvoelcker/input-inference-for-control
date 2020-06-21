@@ -18,6 +18,9 @@ import matplotlib.pyplot as plt
 # import jax.numpy as np
 import jax.scipy.special
 import jax.numpy as np
+import jax
+from jax import random
+import numpy as onp
 import scipy.special
 from copy import deepcopy
 from contextlib import contextmanager
@@ -39,6 +42,10 @@ from pi2c.cost_function import Cost2Prob
 from pi2c.policy_torch import get_policy
 from pi2c.score_matching import score_matching
 
+def nop(it, *a, **k):
+    return it
+
+# tqdm = nop
 
 # abstract over numerical functions for different backends
 # necessary to code forward/backward for both torch and numpy
@@ -84,6 +91,8 @@ class ParticleI2cCell(nn.Module):
 
         self.u_samples = num_u_samples
 
+        self.key = random.PRNGKey(0)
+
     def set_policy(self, strategy, smoothing, policy_config):
         if strategy == 'VSMC':
             self.policy = get_policy(
@@ -126,7 +135,6 @@ class ParticleI2cCell(nn.Module):
     def forward_pass(self, particles, iteration, failed=False, alpha=1.):
         new_u = []
         new_u = self.policy(particles, self.u_samples)
-        # print(np.mean(new_u))
         if self.strategy == 'torch':
             particles = torch.repeat_interleave(particles, self.u_samples, 0)
             samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p, alpha)
@@ -146,23 +154,32 @@ class ParticleI2cCell(nn.Module):
     def greedy_backward_reweighing(self, particles, samples, weights):
         samples = np.take(self.samples, samples)
         self.log_weights = np.take(self.log_weights, samples) + weights
-        return np.take(self.particles, samples), samples, self.log_weights
+        return self.particles[samples], samples, self.log_weights
 
     def backward_smoothing(self, samples, unused, weights):
         """ Smoothing by backwards reweighing after Doucet et al
         """
-        smoothed_weights = []
-        for p in self.particles:
-            p = p.reshape(1,-1)
-            forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T)
-            forward_ll_w = forward_ll + weights
-            forward_ll_norm = logsumexp(forward_ll + self.log_weights)
-            forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
-            smoothed_weights.append(forward_ll_w_normalized)
         if self.strategy == 'VSMC':
+            smoothed_weights = []
+            for p in self.particles:
+                p = p.reshape(1,-1)
+                forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T)
+                forward_ll_w = forward_ll + weights
+                forward_ll_norm = logsumexp(forward_ll + self.log_weights)
+                forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
+                smoothed_weights.append(forward_ll_w_normalized)
             smoothed_weights = torch.tensor(smoothed_weights)
         elif self.strategy == 'mixture':
-            smoothed_weights = np.array(smoothed_weights)
+            def smoothing_loop(p):
+                p = p.reshape(1,-1)
+                forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T)
+                forward_ll += np.log(self.policy.conditional_likelihood(p[:, :self.dim_x], p[:, self.dim_x:]))
+                forward_ll_w = forward_ll + weights
+                forward_ll_norm = logsumexp(forward_ll + self.log_weights)
+                forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
+                return forward_ll_w_normalized
+            smoothed_weights = jax.vmap(smoothing_loop)(self.particles)
+        smoothed_weights += self.log_weights
         self.log_weights = smoothed_weights
         return self.particles, self.samples, smoothed_weights
 
@@ -188,7 +205,10 @@ class ParticleI2cCell(nn.Module):
     def update_policy(self, particles, weights):
         """
         """
-        self.policy.update_parameters(particles, weights)
+        self.key, sk = random.split(self.key)
+        samples = random.gumbel(sk, (len(particles), len(particles)))
+        choices = np.argmax(samples + weights.reshape(-1,1), 0)
+        self.policy.update_parameters(particles[choices], np.zeros_like(weights))
 
     def current_backward_costs(self):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
@@ -324,7 +344,7 @@ class ParticleI2cGraph():
         # run per cell loop
         for i in tqdm(range(self.batch_size)):
             samples, all_samples = self.simulate_forward(self._alpha, run_bimodal_exp)
-            final_weights = self.cost(samples, np.zeros((self.num_p, 1)))
+            final_weights = self._alpha * self.cost(samples, np.zeros((self.num_p, 1)))
             weights_backward = self.simulate_backwards(samples, final_weights)
             all_particles.append(all_samples)
             all_weights.append(weights_backward)
@@ -375,7 +395,6 @@ class ParticleI2cGraph():
             particles = np.concatenate(np.array(particles), -2)
             weights = (np.array(weights) - np.max(weights, -1).reshape(*np.array(weights).shape[:2], 1))
             weights = np.array(list(reversed(np.concatenate(weights, -1))))
-            print(np.sum(weights))
             for i, c in tqdm(list(enumerate(self.cells))):
                 c.update_policy(particles[i], weights[i])
             if update_alpha:

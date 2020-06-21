@@ -11,6 +11,7 @@ import torch
 from torch.distributions import MultivariateNormal
 
 import pi2c.env_def as env_def
+from pi2c import jax_gmm
 
 
 class BaseSim(object):
@@ -151,8 +152,8 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
 
     def log_likelihood(self, x0, u, x1):
         _x = self.A @ x0 + self.B @ u + self.a
-        mu = _x - x1
-        return self.noise_pdf.logpdf(mu.T)
+        ll = jax_gmm.vec_log_normal_pdf(_x.T, np.eye(self.dim_x) * self.sig_x_noise, x1.T)
+        return ll
 
 class PendulumKnown(env_def.PendulumKnown, BaseSim):
 
