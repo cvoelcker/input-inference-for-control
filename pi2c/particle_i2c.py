@@ -174,7 +174,7 @@ class ParticleI2cCell(nn.Module):
         elif self.strategy == 'mixture':
             def smoothing_loop(p):
                 p = p.reshape(1,-1)
-                forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T)
+                forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T).reshape(-1)
                 # forward_ll += np.log(self.policy.conditional_likelihood(samples[:, :self.dim_x], samples[:, self.dim_x:]))
                 forward_ll_w = forward_ll + weights
                 forward_ll_norm = logsumexp(forward_ll + self.log_weights)
@@ -206,11 +206,8 @@ class ParticleI2cCell(nn.Module):
     def update_policy(self, particles, weights):
         """
         """
-        print('\n'* 3)
-        print(self.i)
         resampled_particles = []
         for p, w in zip(particles, weights):
-            print(1/np.sum(jax.nn.softmax(w) ** 2))
             self.key, sk = random.split(self.key)
             samples = random.gumbel(sk, (len(p), len(p)))
             choices = np.argmax(samples + w.reshape(-1,1), 0)
@@ -329,7 +326,6 @@ class ParticleI2cGraph():
             alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
             if update_alpha:
                 self.alpha = alpha
-                print(self.alpha)
             if self.policy_type == 'VSMC':
                 losses.append(loss.detach().numpy())
         if self.policy_type == 'VSMC':
@@ -337,6 +333,10 @@ class ParticleI2cGraph():
             for c in self.cells:
                 c.save_state('{}/model_state_{}_'.format(log_dir, self.log_id) + '{}.torch')
         self.log_id += 1
+        print()
+        print(self.alpha)
+        print(particles[0][0].mean(0))
+        print(particles[0][0].var(0))
         return self.alpha
 
     def _expectation(self, iteration, run_bimodal_exp):
@@ -352,7 +352,7 @@ class ParticleI2cGraph():
         # run per cell loop
         for i in tqdm(range(self.batch_size)):
             samples, all_samples = self.simulate_forward(self._alpha, run_bimodal_exp)
-            final_weights = self._alpha * self.cost(samples, np.zeros((self.num_p, 1)))
+            final_weights = self._alpha * self.cost(samples, np.zeros((len(samples), 1)))
             weights_backward, particles_backward = self.simulate_backwards(samples, final_weights)
             all_particles.append(particles_backward)
             all_weights.append(weights_backward)
@@ -412,7 +412,11 @@ class ParticleI2cGraph():
                 np_weights = np.concatenate(np.concatenate(np.flip(jax.nn.softmax(weights), 1), -1), 0)
                 alpha = self._score_matching_alpha_update(np_particles, np_weights)
                 converged = False
-                # alpha, converged = self._quadratic_alpha_update(self.alpha)
+                print()
+                print()
+                print(alpha)
+                alpha, converged = self._quadratic_alpha_update(self.alpha)
+                print(alpha)
             else:
                 converged = False
                 alpha = self.alpha
