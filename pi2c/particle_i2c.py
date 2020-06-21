@@ -181,9 +181,8 @@ class ParticleI2cCell(nn.Module):
                 forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
                 return forward_ll_w_normalized
             smoothed_weights = jax.vmap(smoothing_loop)(self.particles)
-        smoothed_weights += self.log_weights
-        self.log_weights = smoothed_weights
-        return self.particles, self.samples, smoothed_weights
+        self.log_weights += smoothed_weights
+        return self.particles, self.samples, self.log_weights
 
     def backward_pass(self, particles, samples, weights):
         if self.smoothing == 'greedy':
