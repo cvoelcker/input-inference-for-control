@@ -209,14 +209,15 @@ class ParticleI2cCell(nn.Module):
         """
         print('\n'* 5)
         resampled_particles = []
-        for p, w in zip(particles, weights):
-            self.key, sk = random.split(self.key)
-            samples = random.gumbel(sk, (len(p), len(p)))
-            choices = np.argmax(samples + w.reshape(-1,1), 0)
-            resampled_particles.append(np.take(p, choices, 0))
-        resampled_particles = np.concatenate(resampled_particles, 0)
-        print(resampled_particles)
-        self.policy.update_parameters(resampled_particles, np.zeros_like(resampled_particles[:, 1]))
+        p = np.concatenate(particles)
+        w = np.concatenate(weights)
+        # for p, w in zip(particles, weights):
+        #     self.key, sk = random.split(self.key)
+        #     samples = random.gumbel(sk, (len(p), len(p)))
+        #     choices = np.argmax(samples + w.reshape(-1,1), 0)
+        #     resampled_particles.append(np.take(p, choices, 0))
+        # resampled_particles = np.concatenate(resampled_particles, 0)
+        self.policy.update_parameters(p, w)#np.zeros_like(resampled_particles[:, 1]))
 
     def current_backward_costs(self):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
