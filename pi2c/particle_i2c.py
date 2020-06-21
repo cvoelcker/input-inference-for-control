@@ -173,7 +173,7 @@ class ParticleI2cCell(nn.Module):
             def smoothing_loop(p):
                 p = p.reshape(1,-1)
                 forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T)
-                forward_ll += np.log(self.policy.conditional_likelihood(p[:, :self.dim_x], p[:, self.dim_x:]))
+                # forward_ll += np.log(self.policy.conditional_likelihood(samples[:, :self.dim_x], samples[:, self.dim_x:]))
                 forward_ll_w = forward_ll + weights
                 forward_ll_norm = logsumexp(forward_ll + self.log_weights)
                 forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
@@ -205,10 +205,14 @@ class ParticleI2cCell(nn.Module):
     def update_policy(self, particles, weights):
         """
         """
-        self.key, sk = random.split(self.key)
-        samples = random.gumbel(sk, (len(particles), len(particles)))
-        choices = np.argmax(samples + weights.reshape(-1,1), 0)
-        self.policy.update_parameters(particles[choices], np.zeros_like(weights))
+        resampled_particles = []
+        for p, w in particles, weights:
+            self.key, sk = random.split(self.key)
+            samples = random.gumbel(sk, (len(p), len(p)))
+            choices = np.argmax(samples + w.reshape(-1,1), 0)
+            resampled_particles.append(p[choices])
+        resampled_particles = np.concatenate(resampled_particles, 0)
+        self.policy.update_parameters(resampled_particles, np.zeros_like(weights))
 
     def current_backward_costs(self):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
@@ -392,11 +396,11 @@ class ParticleI2cGraph():
             else:
                 return None, loss, converged
         if self.policy_type == 'mixture':
-            particles = np.concatenate(np.array(particles), -2)
+            particles = np.array(particles)
             weights = (np.array(weights) - np.max(weights, -1).reshape(*np.array(weights).shape[:2], 1))
-            weights = np.array(list(reversed(np.concatenate(weights, -1))))
+            weights = np.array(list(reversed(weights)))
             for i, c in tqdm(list(enumerate(self.cells))):
-                c.update_policy(particles[i], weights[i])
+                c.update_policy(particles[:, i], weights[:, i])
             if update_alpha:
                 alpha, converged = self._quadratic_alpha_update(self.alpha)
             else:
