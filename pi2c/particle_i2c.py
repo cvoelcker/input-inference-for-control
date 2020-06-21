@@ -1,8 +1,27 @@
+"""
+Big list of TODO:
+    - dependence on torch
+        - alpha is disentangled
+        - particles are sometimes explicitely casted to torch, remove
+    - unify start state sampling and maybe work into env
+        - small env wrapper for pytorch for consistency?
+    - keep run weights and particles separate without going over RAM
+    - implement different networks properly in poliy_torch
+    - reimplementd KDE from git history
+        - move policy update functions still in ParticleCell to one location and abstract
+    - merge MoG policy/joint
+    - implement alpha strategies
+    - rework plotting
+"""
+
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
-import numpy as np
-from scipy.optimize import minimize, brentq
-from scipy.special import logsumexp
+# import jax.numpy as np
+import jax.scipy.special
+import jax.numpy as np
+import jax
+from jax import random
+import numpy as onp
+import scipy.special
 from copy import deepcopy
 from contextlib import contextmanager
 import pdb
@@ -12,34 +31,55 @@ import dill
 from tqdm import tqdm
 from abc import ABC, abstractmethod
 
+import torch
+from torch import nn, optim
+
 import cProfile
 
 from pi2c.utils import converged_list, finite_horizon_lqr, GaussianPrior
 from pi2c.jax_gmm import GMM
 from pi2c.cost_function import Cost2Prob
+from pi2c.policy_torch import get_policy
+from pi2c.score_matching import score_matching
+
+def nop(it, *a, **k):
+    return it
+
+# tqdm = nop
+
+# abstract over numerical functions for different backends
+# necessary to code forward/backward for both torch and numpy
+# based architectures
+BACKEND = 'torch'
+def set_numerical_backend(backend):
+    if backend in ['torch', 'jax', 'numpy']:
+        BACKEND = backend
+    else:
+        raise NotImplementedError('Backend {} unkown'.format(backend))
+
+logsumexp_dict = {'torch': lambda x: torch.logsumexp(x, 0),
+        'jax': jax.scipy.special.logsumexp,
+        'numpy': scipy.special.logsumexp}
+def logsumexp(x):
+    return logsumexp_dict[BACKEND](x)
 
 
-class ParticleI2cCell():
+class ParticleI2cCell(nn.Module):
 
-    def __init__(self, i, sys, cost, num_p, M, alpha_init, gmm_components=4, u_samples=10):
+    def __init__(self, i, num_p, num_u_samples, alpha_init):
         """Initializes a particel swarm cell at a specific time index
         
         Arguments:
             i {int} -- time index of the cell
-            sys {env} -- the stochastic environment
+            env {env} -- the stochastic environment
             cost {cost} -- the cost function aka the observation probability
             num_p {int} -- number of particles
             M {int} -- number of backward trajectories for smoothing
         """
+        super().__init__()
         self.i = i
-        self.sys = sys
-        self.dim_u = sys.dim_u
-        self.dim_x = sys.dim_x
-        self.cost = cost
-        self.obs_lik = Cost2Prob(self.cost)
         self.back_particle = None
         self.num_p = num_p
-        self.M = M
         self.alpha = alpha_init
 
         self.particles = None
@@ -49,259 +89,376 @@ class ParticleI2cCell():
         self.back_particles = None
         self.back_weights = None
 
-        # build broad EM prior
-        self.xu_joint = GMM(self.dim_x + self.dim_u, gmm_components)
+        self.u_samples = num_u_samples
 
-        self.u_samples = u_samples
+        self.key = random.PRNGKey(0)
 
-    def copy(self):
-        new_cell = ParticleI2cCell(self.i, self.sys, self.cost, self.num_p, self.M, self.mu_u0, self.sig_u0, self.alpha, self.gmm_components, self.u_samples)
-        new_cell.xu_joint = self.xu_joint.copy()
-        new_cell.particles = self.particles.copy()
-        new_cell.log_weights = self.log_weights.copy()
-        new_cell.new_particles = self.new_particles.copy()
-        new_cell.back_particles = self.back_particles.copy()
-        new_cell.back_weights = self.back_weights.copy()
-        return new_cell
+    def set_policy(self, strategy, smoothing, policy_config):
+        if strategy == 'VSMC':
+            self.policy = get_policy(
+                    policy_config.nn_type, 
+                    self.dim_x, 
+                    self.dim_u, 
+                    policy_config.init_policy_mean, 
+                    policy_config)
+        elif strategy == 'mixture':
+            self.policy = GMM(
+                self.dim_x + self.dim_u, 
+                policy_config.components, 
+                self.dim_x, 
+                policy_config.init_policy_variance)
+        elif strategy == 'KDE':
+            # TODO: setup KDE policy/joint
+            raise NotImplementedError('[WIP] Implement')
+        
+        if smoothing in ['greedy', 'smoothing']:
+            self.smoothing = smoothing
+        else:
+            raise ValueError('Smoothing strategy unknown')
+        self.strategy = strategy
 
-    def particles_x(self):
-        return self.back_particles[:, :self.dim_x]
+    def set_env(self, env, cost):
+        self.env = env
+        self.dim_u = env.dim_u
+        self.dim_x = env.dim_x
+        self.cost = cost
+        self.obs_lik = Cost2Prob(self.cost)
 
-    def particles_u(self):
-        return self.back_particles[:, self.dim_x:]
-
+    @property
     def forward_done(self):
         return self.particles is not None
 
+    @property
     def backward_done(self):
         return self.back_particles is not None
 
-    def forward(self, particles, iteration, failed=False, alpha=1., use_time_alpha=False):
+    def forward_pass(self, particles, iteration, failed=False, alpha=1.):
         new_u = []
-        new_u = self.xu_joint.conditional_sample(particles, self.dim_x, self.u_samples)
-        assert not np.any(np.isnan(new_u)), new_u
-        particles = np.repeat(particles, self.u_samples, 0)
-        if use_time_alpha:
-            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, self.alpha)
-        else:
-            samples, self.log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p//self.u_samples, alpha)
-        self.particles = np.concatenate([particles, new_u], 1)[samples]
-        assert not np.any(np.isnan(self.particles))
-        self.new_particles = self.sys.sample(particles[samples].T, new_u[samples].T).T
+        new_u = self.policy(particles, self.u_samples)
+        if self.strategy == 'VSMC':
+            particles = torch.repeat_interleave(particles, self.u_samples, 0)
+            samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p, alpha)
+            samples.detach()
+        elif self.strategy == 'mixture':
+            particles = np.repeat(particles, self.u_samples, 0)
+            samples, log_weights = self.obs_lik.log_sample_jax(particles, new_u, self.num_p, alpha)
+        self.samples = samples//self.u_samples
+        self.log_weights = log_weights[samples].squeeze()
+        if self.strategy == 'VSMC':
+            self.particles = torch.cat([particles, new_u], 1)[samples]
+        elif self.strategy == 'mixture':
+            self.particles = np.concatenate((particles, new_u), 1)[samples]
+        self.new_particles = self.env.sample(particles[samples].T, new_u[samples].T).T
+        # print(self.particles.mean(0))
+        # print(self.policy.log_likelihood(self.particles).mean())
         return self.new_particles, self.particles, failed
 
-    def backward(self, particles):
-        backwards = []
-        smoothing_weights = []
-        all_samples = []
-        for p in particles:
-            p = p[:self.dim_x].reshape(-1, 1)
-            particle_likelihood = self.sys.likelihood(
-                self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p)
-            # renormalize
-            particle_likelihood /= np.sum(particle_likelihood)
-            # sample likely ancestor
-            samples = np.random.choice(
-                np.arange(self.num_p//self.u_samples), 
-                size=1, 
-                replace=True, 
-                p=particle_likelihood)
-            all_samples.append(samples)
-            # save backwards sample
-            backwards.append(self.particles[samples].reshape(-1))
-            # save smoothing weights
-            smoothing_weights.append(particle_likelihood)
-        self.back_particles = np.array(backwards)
-        self.back_weights = np.array(smoothing_weights)
-        return np.array(self.back_particles)
+    def greedy_backward_reweighing(self, particles, samples, weights):
+        if self.strategy == 'mixture':
+            samples = np.take(self.samples, samples)
+        elif self.strategy == 'VSMC':
+            print(torch.gather(self.log_weights, 0, torch.tensor(samples)))
+            print(samples)
+            self.log_weights = self.log_weights[samples] + weights
+        return self.particles[samples], samples, self.log_weights
 
-    def policy(self, x):
-        """Extracts a policy from the posterior particle GMM
+    def backward_smoothing(self, samples, unused, weights):
+        """ Smoothing by backwards reweighing after Doucet et al
+        """
+        if self.strategy == 'VSMC':
+            smoothed_weights = []
+            for p in self.particles:
+                p = p.reshape(1,-1)
+                forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T)
+                forward_ll_w = forward_ll + weights
+                forward_ll_norm = logsumexp(forward_ll + self.log_weights)
+                forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
+                smoothed_weights.append(forward_ll_w_normalized)
+            smoothed_weights = torch.tensor(smoothed_weights)
+        elif self.strategy == 'mixture':
+            def smoothing_loop(p):
+                p = p.reshape(1,-1)
+                forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T).reshape(-1)
+                # forward_ll += np.log(self.policy.conditional_likelihood(samples[:, :self.dim_x], samples[:, self.dim_x:]))
+                forward_ll_w = forward_ll + weights
+                forward_ll_norm = logsumexp(forward_ll + self.log_weights)
+                forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
+                return forward_ll_w_normalized
+            smoothed_weights = jax.vmap(smoothing_loop)(self.particles)
+        self.log_weights += smoothed_weights
+        return self.particles, self.samples, self.log_weights
+
+    def backward_pass(self, particles, samples, weights):
+        if self.smoothing == 'greedy':
+            return self.greedy_backward_reweighing(particles, samples, weights)
+        elif self.smoothing == 'smoothing':
+            return self.backward_smoothing(particles, samples, weights)
+        else:
+            raise NotImplementedError('Unknown smoothing strategy')
+
+    def get_policy(self, x):
+        """
+        TODO: abstract away
+        Extracts a policy from the posterior particle GMM
         using conditional max
         
         Arguments:
-            x {np.ndarray} -- current position of the system
+            x {np.ndarray} -- current position of the envtem
         """
-        return self.xu_joint.conditional_mean(x, self.dim_x)
+        return self.policy.conditional_mean(x, self.dim_x)
 
-    def update_xu_joint(self):
-        """Updates the prior for u by smoothing the posterior particle distribution 
-        with a kernel density estimator
+    def update_policy(self, particles, weights):
         """
-        smoothed_posterior = GMM(self.back_particles, 
-            np.ones(len(self.back_particles))/len(self.back_particles), 
-            self.smooth_prior)
-        self.xu_joint = smoothed_posterior.marginalize(np.arange(self.dim_x, self.dim_x+self.dim_u))
-
-    def update_alpha(self):
-        """Not done
         """
-        all_costs = self.cost(self.particles_x(), self.particles_u())
+        resampled_particles = []
+        for p, w in zip(particles, weights):
+            self.key, sk = random.split(self.key)
+            samples = random.gumbel(sk, (len(p), len(p)))
+            choices = np.argmax(samples + w.reshape(-1,1), 0)
+            resampled_particles.append(np.take(p, choices, 0))
+        resampled_particles = np.concatenate(resampled_particles, 0)
+        self.policy.update_parameters(resampled_particles, np.zeros_like(resampled_particles[:, 1]))
 
-        def alpha_eq(a):
-            return np.sum(a * all_costs) - logsumexp(a * all_costs)
-
-        def alpha_der(a):
-            return np.sum(all_costs) - (np.sum(all_costs*np.exp(a*all_costs)))/(np.sum(np.exp(a*all_costs)))
-    
     def current_backward_costs(self):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
         return c.mean(), c.var()
 
+    def save_state(self, save_path):
+        torch.save(self.policy, save_path.format(self.i))
+
+    def load_state(self, save_path):
+        self.policy = torch.load(save_path.format(self.i))
+
 
 class ParticleI2cGraph():
     
-    def __init__(self, sys, cost, T, num_p, M, mu_x0, sig_x0, mu_u0, sig_u0, alpha_init, gmm_components=1, u_samples=100, num_runs=10):
+    def __init__(self, T, num_p, num_u_samples, M, mu_x0, sig_x0, alpha_init):
         """[summary]
         
         Arguments:
-            sys {[type]} -- [description]
+            env {[type]} -- [description]
             cost {[type]} -- [description]
             T {[type]} -- [description]
             num_p {[type]} -- [description]
             M {[type]} -- [description]
         """
-        self.sys = sys
-        self.cost = cost
+        self.log_id = 0
+
+        self.env = None
+        self.cost = None
         self.T = T
         self.num_p = num_p
         self.M = M
-        self.u_samples = u_samples
-        self.num_f_p = self.num_p//self.u_samples
+        self.num_u_samples = num_u_samples
+        self.num_f_p = self.num_p * self.num_u_samples
         self.alpha = alpha_init
 
         self.mu_x0 = mu_x0
-        self.mu_u0 = mu_u0
         self.sig_x0 = sig_x0
-        self.sig_u0 = sig_u0
-
+        self.x0_dist = GaussianPrior(mu_x0, sig_x0)
+        
         self.cells = []
         for t in range(T):
-            self.cells.append(ParticleI2cCell(t, sys, cost, num_p, M, alpha_init, gmm_components, u_samples))
-
-        self.gmm_components = gmm_components
-        self.x0_dist = GaussianPrior(mu_x0, sig_x0)
-        self.num_runs = num_runs
-        
-        # borrowed from the quadratic cost assumption
-        # invalid for other costs
-        self.sigXi0 = np.linalg.inv(self.cost.QR)
+            self.cells.append(
+                ParticleI2cCell(
+                    t, num_p, num_u_samples, alpha_init))
 
         self.UPDATE_ALPHA = True
 
+        self.policy_ready = False
+        self.env_ready = False
+        self.optimizer_ready = False
+
+        self.numerical_backend = 'torch' # options are jax, numpy, torch
+
     @property
-    def is_multimodal(self):
-        return self.gmm_components > 1
+    def is_ready(self):
+        return self.policy_ready and self.env_ready and self.optimizer_ready
 
-    def init_costs(self):
-        """Get an MC estimate of the current cost function integral (currently not used)
-        """
-        num_samples = 10000
+    def set_policy(self, strategy, smoothing, parameters=None):
+        assert self.env_ready, 'Tried to set policy before env'
+        self.smoothing_strategy = smoothing
+        self.policy_type = strategy
+        for c in self.cells:
+            c.set_policy(strategy, smoothing, parameters)
+        if self.policy_type == 'mixture':
+            self.gmm_components = parameters.components
+            self.cost.torch = False
+        self.policy_ready = True
 
-        s_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_x))
-        a_grid = np.random.uniform(-100, 100, (num_samples, self.sys.dim_u))
+    def set_optimizer(self, strategy, batch_size, norm=None, lr=None, optimizer=None):
+        assert self.policy_ready, 'Tried to set optimization before policy'
+        self.optimizer_type = strategy
+        if strategy == 'gradient':
+            assert self.policy_type == 'VSMC', 'Gradient training only available for NN style policy'
+            self.lr = lr
+            self.norm = norm
+            self.optimizer = optim.Adam(
+                    [{'params': c.policy.parameters()} for c in self.cells
+                     ], lr=self.lr)
+            self.alpha_update = 'heuristic'
+        if strategy == 'em':
+            self.alpha_update = 'quadratic'
+            self.sigXi0 = np.linalg.inv(self.cost.QR.numpy())
+        self.batch_size = batch_size
+        self.optimizer_ready = True
 
-        self.sample_costs = self.cost(s_grid, a_grid)
+    def set_env(self, env, cost):
+        self.env = env
+        self.cost = cost
+        for c in self.cells:
+            c.set_env(env, cost)
 
-    def run(self, init_alpha, use_time_alpha=False, max_iter=1000):
-        # if use_time_alpha:
-        #     for c in self.cells:
-        #         c.alpha = init_alpha
-        alpha = init_alpha
+        # borrowed from the quadratic cost assumption
+        # invalid for other costs
+        # self.sigXi0 = np.linalg.inv(self.cost.QR)
+        self.env_ready = True
+
+    @property
+    def _alpha(self):
+        if self.policy_type == 'VSMC':
+            return torch.tensor([float(self.alpha)])
+        elif self.policy_type == 'mixture':
+            return float(self.alpha)
+
+    def run(self, it, max_iter, log_dir='log/', run_bimodal_exp=False):
         _iter = 0
-        while True and _iter < max_iter:
-            self._expectation(init_alpha, _iter, use_time_alpha)
-            next_alpha, converged = self._maximization(alpha, use_time_alpha)
-            # alpha = np.clip(next_alpha, 0.5 * alpha, 2 * alpha)
-            if use_time_alpha and self.check_alpha_converged():
-                    break
-            elif converged:
-                break
-            _iter += 1
-        return next_alpha
+        losses = []
+        for _iter in tqdm(range(max_iter)):
+            weights, particles = self._expectation(_iter, run_bimodal_exp)
+            update_alpha = _iter == (max_iter-1)
+            alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
+            if update_alpha:
+                self.alpha = alpha
+            if self.policy_type == 'VSMC':
+                losses.append(loss.detach().numpy())
+        if self.policy_type == 'VSMC':
+            np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
+            for c in self.cells:
+                c.save_state('{}/model_state_{}_'.format(log_dir, self.log_id) + '{}.torch')
+        self.log_id += 1
+        print()
+        print(self.alpha)
+        print(particles[0][0].mean(0))
+        print(particles[0][0].var(0))
+        return self.alpha
 
-    def _expectation(self, alpha, iteration, use_time_alpha=False):
+    def _expectation(self, iteration, run_bimodal_exp):
         """Runs the forward, backward smoothing algorithm to estimate the
         current optimal state action trajectory
         
         Arguments:
             alpha {float} -- the current alpha optimization parameter
         """
-        all_samples = []
-        all_f_samples = []
-        failed_counter = 0
-        i = self.num_runs
-        num_seq_failed = 0
-        with tqdm(total=self.num_runs) as pbar:
-            while i > 0:
-                run_samples = []
-                run_f_samples = []
-                # sample initial x from the systems inital distribution
-                particles = self.x0_dist.sample(self.num_p//self.u_samples)
+        # sample initial x from the systems inital distribution
+        all_weights = []
+        all_particles = []
+        # run per cell loop
+        for i in tqdm(range(self.batch_size)):
+            samples, all_samples = self.simulate_forward(self._alpha, run_bimodal_exp)
+            if self.policy_type == 'VSMC':
+                final_weights = self._alpha * self.cost(samples, torch.zeros((len(samples), 1)))
+            elif self.policy_type == 'mixture':
+                final_weights = self._alpha * self.cost(samples, np.zeros((len(samples), 1)))
+            weights_backward, particles_backward = self.simulate_backwards(samples, final_weights)
+            all_particles.append(particles_backward)
+            all_weights.append(weights_backward)
+        return all_weights, all_particles
 
-                neg = np.random.choice(
-                        np.arange(len(particles)),
-                        len(particles)//2,
-                        replace=False)
-                particles[neg] = -particles[neg]
-                
-                failed = False
-                # run per cell loop
-                for c in self.cells:
-                    particles, sampled, failed = c.forward(particles, iteration, failed, alpha, use_time_alpha)
-                    run_f_samples.append(sampled.copy())
-                    # check if all particle trajectories have a numeric probability of 0
-                    if failed:
-                        num_seq_failed += 1
-                        break
-                if not failed:
-                    num_seq_failed = 0
-                    # initialize the backwards sample
-                    # here, the particles need to be weighted according to the final thing
-                    # (actually, they don't really, since they where weighted in the final round of the forward
-                    # pass), we went one step "too far"
-                    # due to no reweigh, I'm aslo sampling without replacing
-                    if self.M > self.num_p//self.u_samples:
-                        self.M = self.num_p//self.u_samples
-                    backwards_samples = np.random.choice(
-                        np.arange(self.num_p//self.u_samples), 
-                        self.M, 
-                        replace=False)
-                    particles = particles[backwards_samples]
-                    
-                    # run backwards smoothing via sampling
-                    for c in list(reversed(self.cells)):
-                        particles = c.backward(particles)
-                        run_samples.append(particles.copy())
-                    all_samples.append(run_samples)
-                    all_f_samples.append(run_f_samples)
-                    i -= 1
-                    pbar.update(1)
-        self.all_samples = np.concatenate(all_samples, 1)
-        self.all_f_samples = np.concatenate(all_f_samples, 1)
+    def simulate_forward(self, alpha, run_bimodal_exp):
+        all_particles = []
+        if run_bimodal_exp:
+            particles_pos = self.x0_dist.sample(self.num_p//2)
+            particles_neg = -self.x0_dist.sample(self.num_p//2)
+            particles = np.concatenate((particles_pos, particles_neg), 0)
+        else:
+            particles = self.x0_dist.sample(self.num_p)
+        if self.policy_type == 'VSMC':
+            particles = torch.Tensor(particles)
+        failed = False
+        iteration = 0
+        for c in self.cells:
+            particles, sampled, failed = c.forward_pass(particles, iteration, failed, alpha)
+            all_particles.append(sampled)
+        return particles, all_particles
 
-        for i, c in enumerate(list(reversed(self.cells))):
-            c.back_particles = self.all_samples[i]
-        
-    def _maximization(self, alpha, use_time_alpha=False):
+    def simulate_backwards(self, samples, weights):
+        all_weights = []
+        samples = onp.arange(len(samples))
+        particles = self.cells[-1].new_particles
+        all_particles = []
+        for c in reversed(self.cells):
+            particles, samples, weights = c.backward_pass(particles, samples, weights)
+            all_particles.append(particles)
+            all_weights.append(c.log_weights)
+        return all_weights, all_particles
+
+    def _maximization(self, weights, particles, update_alpha=False):
+        if self.policy_type == 'VSMC':
+            particles = [torch.cat(p) for p in particles]
+            logsumexp_weights = []
+            for batch in weights:
+                for w in batch:
+                    logsumexp_weights.append(torch.logsumexp(w, 0))
+            loss, converged = self._vsmc_maximization(logsumexp_weights)
+            if update_alpha:
+                np_particles = torch.cat(particles).detach().numpy()
+                np_weights = np.concatenate([jax.nn.softmax(w.detach().numpy()) for w in weights[0]])
+                alpha = self._score_matching_alpha_update(np_particles, np_weights)
+                return alpha, loss, converged
+            else:
+                return None, loss, converged
+        if self.policy_type == 'mixture':
+            particles = np.array(particles)
+            # weights = np.array(weights) - np.max(weights, -1, keepdims=True)
+            weights = np.array(weights)
+            for i, c in tqdm(list(enumerate(reversed(self.cells)))):
+                c.update_policy(particles[:, i], weights[:, i])
+            if update_alpha:
+                np_particles = np.concatenate(np.concatenate(particles, -2), 0)
+                np_weights = np.concatenate(np.concatenate(np.flip(jax.nn.softmax(weights), 1), -1), 0)
+                alpha = self._score_matching_alpha_update(np_particles, np_weights)
+                converged = False
+                print()
+                print()
+                print(alpha)
+                alpha, converged = self._quadratic_alpha_update(self.alpha)
+                print(alpha)
+            else:
+                converged = False
+                alpha = self.alpha
+            return alpha, None, converged
+
+    def _vsmc_maximization(self, weights):
         ## JOINT UPDATE
-        ll = 0.
-        v = 0.
-        for i, c in tqdm(list(enumerate(self.cells))):
-            c.xu_joint.update_parameters(c.back_particles)
-            r = c.current_backward_costs()
-            ll += r[0]
-            v  += r[1]
-        print(self.cells[-1].back_particles.mean(0))
-        print(self.cells[-1].back_particles.var(0))
-        print(ll/100.)
-        print(v/100.)
-        if self.UPDATE_ALPHA:
-            alpha, converged = self._alpha_update(alpha, use_time_alpha)
-        return alpha, converged
+        self.optimizer.zero_grad()
+        loss = torch.stack(weights)
+        loss = -torch.sum(loss)
+        loss.backward()
+        for c in self.cells:
+            nn.utils.clip_grad_norm_(c.policy.parameters(), 100.)
+        self.optimizer.step()
+        converged = False
+        return loss, converged
 
-    def _alpha_update(self, alpha, use_time_alpha=False):
+    def _heuristic_alpha_update(self, proposals, rounds):
+        with torch.no_grad():
+            alpha_proposals = torch.distributions.Normal(self.alpha, 0.5).sample((proposals, )).flatten()
+            proposal_weights = []
+            for i, alpha in enumerate(tqdm(alpha_proposals)):
+                proposal_weights.append([])
+                for j in range(rounds):
+                    weights = self._expectation(None)
+                    weights = torch.stack(weights).flatten()
+                    weights = torch.mean(weights, 0)
+                    proposal_weights[i].append(weights)
+        proposal_weights = [torch.mean(torch.tensor(proposal_weights[i])) for i in range(proposals)]
+        i = np.argmax(proposal_weights)
+        return alpha_proposals[i]
+
+    def _quadratic_alpha_update(self, alpha):
         # aka update alpha
+        # this assumes a linear gaussian, or at least MoG joint
         # also has a time-varying alpha idea that was bad (but exciting)
         # we should probably recheck that with the particle filter, since it might
         # help with variance issues
@@ -309,31 +466,18 @@ class ParticleI2cGraph():
         s_covar = np.zeros_like(self.sigXi0)
         for i, c in enumerate(self.cells):
             for comp in range(self.gmm_components):
-                if np.any(np.isnan(c.xu_joint._mu[comp])):
+                if np.any(np.isnan(c.policy._mu[comp])):
                     print("y_m is nan")
                     nan_traj = True
                 else:
-                    err = c.xu_joint._mu[comp]  - self.cost.zg
-                    s_covar_t = (err.dot(err.T) + c.xu_joint._sig[comp])
-                    s_covar += c.xu_joint._pi[comp] * s_covar_t
+                    err = c.policy._mu[comp] - self.cost.zg.numpy()
+                    s_covar_t = (err.dot(err.T) + c.policy._sig[comp])
+                    s_covar += c.policy._pi[comp] * s_covar_t
 
-            if use_time_alpha:
-                s_covar = (s_covar + s_covar.T) / 2.0
-                c_alpha = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
-                #c.alpha = np.clip(c_alpha, 0.66*c.alpha, 1.5*c.alpha)
-                c.alpha = c_alpha
-                s_covar = np.zeros_like(s_covar)
-
-                    # logging, figure out later
-                    # tv = np.trace(np.linalg.solve(self.sigXi0, s_covar_t)) / float(self.sys.dim_y)
-                    # self.alpha_tv[i] = np.clip(tv, 0.5, 50)
         s_covar = s_covar / float(self.T)
         s_covar = (s_covar + s_covar.T) / 2.0
 
-        if use_time_alpha:
-            alpha_update = np.mean([c.alpha for c in self.cells])
-        else:
-            alpha_update = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.sys.dim_y))
+        alpha_update = 1/(np.trace(np.linalg.solve(self.sigXi0, s_covar)) / float(self.env.dim_y))
 
         # error logging
         if nan_traj:
@@ -354,143 +498,12 @@ class ParticleI2cGraph():
             print('New alpha {}'.format(alpha_update))
             return alpha_update, np.isclose(alpha, alpha_update)
     
+    def _score_matching_alpha_update(self, x, weights):
+        alpha = score_matching(self.cost.cost_jax, x, weights.reshape(-1,1))
+        return alpha
+    
     def check_alpha_converged(self):
         return False
 
     def get_policy(self, x, i):
         return self.cells[i].policy(x)
-
-    def copy(self):
-        new_graph = ParticleI2cGraph(self.sys, 
-                self.cost, self.T, self.num_p, 
-                self.M, self.mu_x0, self.sig_x0, 
-                self.mu_u0, self.sig_u0, self.alpha_init, 
-                self.gmm_components, self.u_samples, 
-                self.num_runs)
-        for i, c in enumerate(self.cells):
-            new_graph.cells[i] = c.copy()
-        return new_graph
-
-
-class ParticlePlotter():
-
-    def __init__(self, particle_i2c):
-        self.graph = particle_i2c
-
-    def build_plot(self, title_pre, fig_name=None):
-        pass
-
-    def plot_particle_forward_backwards_cells(self, dim, dim_name='x', fig=None):
-        """This plots the (subsamled) forward and backward particle clouds
-        for a given dimension with mean and sigma shaded.
-
-        Arguments:
-            dim {int} -- dimension to compute particles over
-
-        Keyword Arguments:
-            fig {plt} -- if fig is given, figure will be used and returned
-            otherwise, cloud is printed directly to screen (default: {None})
-        """
-        if fig is None:
-            # initialize new figure
-            fig, axs = plt.subplots(1)
-
-        f_particles = self.graph.all_f_samples[:, :, dim]
-        b_particles = np.flip(self.graph.all_samples[:, :, dim], 0)
-        
-        time_x_loc_f = np.repeat(np.arange(self.graph.T), f_particles.shape[1])
-        time_x_loc_b = np.repeat(np.arange(self.graph.T), b_particles.shape[1])
-
-        if self.graph.is_multimodal:
-            # TODO: Fix multimodal plotting to be nicer (via the gaussian comp sig)
-            # TODO: Howto get prior after update? Rework code
-            pass
-        
-        mean_f, sig_f, sig_upper_f, sig_lower_f = get_mean_sig_bounds(f_particles, 1, 2)
-        mean_b, sig_b, sig_upper_b, sig_lower_b = get_mean_sig_bounds(b_particles, 1, 2)
-
-        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C0', alpha=.1)
-        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C1', alpha=.1)
-        fig.plot(mean_f, color='C0')
-        fig.plot(mean_b, color='C1')
-        fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01, color='C0')
-        fig.scatter(time_x_loc_b, b_particles.flatten(), 0.01, color='C1')
-
-        fig.set_xlabel('Timestep')
-        fig.set_ylabel(dim_name + str(dim))
-        fig.set_title('Forward/backward particles over ' + dim_name + str(dim))
-        
-        return fig
-
-    def plot_joint_forward_backward_cells(self, dim, fig_name=None):
-        pass
-
-    def eval_controler(self, eval_env, cost, repeats=1000, random_starts=True):
-        costs = []
-        us = []
-        x = eval_env.init_env(randomized=random_starts)
-        print('Evaluating envs for plotting')
-        for i in tqdm(range(repeats)):
-            for i in range(self.graph.T):
-                u = self.graph.get_policy(x.flatten(), i).reshape(-1,1)
-                us.append(u)
-                x = eval_env.forward(u)
-                costs.append(cost(x.flatten(), u))
-        costs = np.array(costs).reshape(repeats, -1)
-        us = np.array(us).reshape(repeats, -1)
-        return costs, us
-
-    def plot_controler(self, eval_env, cost, repeats=1000, random_starts=True, fig=None):
-        if fig is None:
-            fig, ax = plt.subplots(2)
-        else:
-            ax = fig
-
-        plt_help_x = np.arange(self.graph.T)
-        costs, us = self.eval_controler(eval_env, cost, repeats=repeats, random_starts=random_starts)
-        
-        mean_c, sig_c, sig_upper_c, sig_lower_c = get_mean_sig_bounds(costs, 0, 2)
-        mean_u, sig_u, sig_upper_u, sig_lower_u = get_mean_sig_bounds(us, 0, 2)
-        # plot costs
-        ax[0].fill_between(plt_help_x, sig_lower_c, sig_upper_c, color='C0', alpha=0.1)
-        for i in range(repeats):
-            ax[0].plot(costs[i], '--', color='C0', lw=0.5)
-        ax[0].plot(mean_c, 'C0')
-        ax[0].set_xlabel('T')
-        ax[0].set_ylabel('cost')
-        ax[0].set_title('Per timestep cost of several controler evaluations')
-
-        # plot controls
-        ax[1].fill_between(plt_help_x, sig_lower_u, sig_upper_u, color='C1', alpha=0.1)
-        for i in range(repeats):
-            ax[1].plot(us[i], '--', color='C1', lw=0.5)
-        ax[1].plot(mean_u, 'C1')
-        ax[1].set_xlabel('T')
-        ax[1].set_ylabel('u')
-        ax[1].set_title('Per timestep control signal of several controler evaluations')
-
-        return fig, ax
-
-
-    def plot_all(self, run_name, eval_env, cost, repeats=10, random_starts=True):
-        plt.clf()
-        fig, axs = plt.subplots(3)
-        fig.suptitle('Particle I2C training ' + run_name)
-        self.plot_particle_forward_backwards_cells(0, fig=axs[0])
-        self.plot_particle_forward_backwards_cells(1, fig=axs[1])
-        self.plot_particle_forward_backwards_cells(2, 'u',fig=axs[2])
-        fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for suptitle
-        fig.savefig('plots/particles_{}.png'.format(run_name))
-        fig, axs = plt.subplots(2)
-        fig.suptitle('Particle I2C controler evaluation ' + run_name)
-        self.plot_controler(eval_env, cost, repeats, random_starts, fig=axs)
-        fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for uptitle
-        fig.savefig('plots/controler_{}.png'.format(run_name))
-
-
-def get_mean_sig_bounds(arr, dim, sig_multiple=1.):
-    mean_arr = arr.mean(dim)
-    sig_arr = arr.std(dim)
-    sig_upper_arr = mean_arr + sig_arr * sig_multiple
-    sig_lower_arr = mean_arr - sig_arr * sig_multiple
-    return mean_arr, sig_arr, sig_upper_arr, sig_lower_arr

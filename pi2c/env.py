@@ -3,10 +3,15 @@ Environments to control
 """
 import matplotlib.pyplot as plt
 import numpy as np
+from jax import random
 import scipy as sc
 import os
 
+import torch
+from torch.distributions import MultivariateNormal
+
 import pi2c.env_def as env_def
+from pi2c import jax_gmm
 
 
 class BaseSim(object):
@@ -101,6 +106,31 @@ class LinearSim(env_def.LinearDef, BaseSim):
         self.x = x.reshape(self.x.shape)
         return self.x
 
+class TorchLinearDisturbed(env_def.LinearDef, BaseSim):
+
+    def __init__(self, duration):
+        self.duration = duration
+        self.a = torch.Tensor(self.a.reshape((-1, 1))) # give me strength...
+        self.sig_x_noise = 0.01
+        self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
+        self.A = torch.Tensor(self.A)
+        self.B = torch.Tensor(self.B)
+        self.normal = MultivariateNormal(torch.zeros(self.dim_x), torch.eye(self.dim_x) * self.sig_x_noise)
+
+    def init_env(self, randomized=False):
+        self.x = np.copy(self.x0)
+        return self.x
+
+    def forward(self, u):
+        x = self.A @ self.x + self.B @ u + self.a
+        x += self.normal.sample((x.shape[1],)).squeeze().view(x.shape)
+        return x
+
+    def log_likelihood(self, x0, u, x1):
+        _x = self.A @ x0 + self.B @ u + self.a
+        mu = _x - x1
+        return self.normal.log_prob(mu.T)
+
 class LinearDisturbed(env_def.LinearDef, BaseSim):
 
     def __init__(self, duration):
@@ -108,23 +138,22 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         self.a = self.a.reshape((-1, 1)) # give me strength...
         self.sig_x_noise = 0.1
         self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
+        self.key = random.PRNGKey(0)
 
     def init_env(self, randomized=False):
         self.x = np.copy(self.x0)
-        if randomized:
-            self.x += np.random.randn(*self.x.shape) * self.sig_x_noise
         return self.x
 
     def forward(self, u):
-        x = self.A.dot(self.x) + self.B.dot(u) + self.a
-        x += np.random.randn(*x.shape) * self.sig_x_noise
-        self.x = x.reshape(self.x.shape)
-        return self.x
+        self.key, sk = random.split(self.key)
+        x = self.A @ self.x + self.B @ u + self.a
+        r = random.normal(sk, x.shape) * self.sig_x_noise
+        return x + r
 
-    def likelihood(self, x0, u, x1):
-        _x = self.A.dot(x0) + self.B.dot(u) + self.a
-        _x -= x1
-        return self.noise_pdf.pdf(_x.T)
+    def log_likelihood(self, x0, u, x1):
+        _x = self.A @ x0 + self.B @ u + self.a
+        ll = jax_gmm.vec_log_normal_pdf(_x.T, np.eye(self.dim_x) * self.sig_x_noise, x1.T)
+        return ll
 
 class PendulumKnown(env_def.PendulumKnown, BaseSim):
 
@@ -234,6 +263,7 @@ def make_env(exp):
     _lookup = {
         "LinearKnown": LinearSim,
         "LinearDisturbed": LinearDisturbed,
+        "TorchLinearDisturbed": TorchLinearDisturbed,
         "PendulumKnown": PendulumKnown,
         "PendulumLinearObservationKnown": PendulumLinearObservationKnown,
         "CartpoleKnown": CartpoleKnown,

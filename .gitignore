@@ -1,6 +1,8 @@
-*/__pycache__/
+**/__pycache__/
 
 # Exclude results files for cleaner git
 *.png
 *.pdf
 *.npy
+
+logging/*

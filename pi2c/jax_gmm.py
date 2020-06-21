@@ -2,8 +2,19 @@ from tqdm import tqdm
 
 import jax.numpy as np
 import numpy
+import jax
 from jax import grad, jit, vmap, value_and_grad, random
 import matplotlib.pyplot as plt
+
+
+class CycleKey():
+    KEY = random.PRNGKey(0)
+
+    def __call__(self):
+        CycleKey.KEY, sk = random.split(CycleKey.KEY)
+        return sk
+
+seed = CycleKey()
 
 
 @jit
@@ -14,8 +25,18 @@ def softmax(vec):
 @jit
 def gaussian_pdf(mu, var, x):
     dim = mu.size
-    norm = ((2 * np.pi) ** (-dim/2)) * (np.linalg.det(var) ** (-1/2)) 
+    norm = ((2 * np.pi) ** (-dim/2)) * (np.linalg.det(var) ** (-1/2))
     return norm * np.exp((-1/2) * (x - mu).T @ np.linalg.inv(var) @ (x - mu))
+
+@jit
+def log_normal_pdf(mu, var, x):
+    dim = mu.size
+    x = x.reshape(1,-1)
+    norm = np.log(((2 * np.pi) ** (-dim/2)) * (np.linalg.det(var) ** (-1/2)))
+    return norm + (-1/2) * (x - mu) @ np.linalg.inv(var) @ (x - mu).T
+
+
+vec_log_normal_pdf = jit(vmap(log_normal_pdf, in_axes=(None, None, 0), out_axes=0))
 
 
 @jit
@@ -88,35 +109,42 @@ def empirical_mu(x, weights=None):
 
 class GMM:
 
-    def __init__(self, dim, n_components, sig0=10000., key=0):
-        self._key = random.PRNGKey(key)
-        self._pi = np.ones(dim) / dim
-        self._mu = random.normal(self._key, (n_components, dim)) * 3.
+    def __init__(self, dim, n_components, idx, sig0=10000., key=0):
+        self._pi = np.ones(n_components) / n_components
+        self._mu = random.normal(seed(), (n_components, dim)) * 3.
         self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * sig0
         self._sig = vmap(np.linalg.cholesky)(self._var)
 
         self.n_components = n_components
         self.dim = dim
+        self.idx = idx
 
     @property
     def params(self):
         return (self._pi, self._mu, self._var)
 
+    def __call__(self, x, n):
+        return self.conditional_sample(x, self.idx, n)
+
     def likelihood(self, x):
         return vmap(gmm, in_axes=(None,0), out_axes=0)(self.params, x)
+
+    def conditional_likelihood(self, x, u):
+        joint_x = np.concatenate([x, u], -1)
+        joint_ll = self.likelihood(joint_x)
+        marginal_ll = vmap(gmm, in_axes=(None,0), out_axes=0)(
+            (self._pi, self._mu[:, :self.idx], self._var[:, :self.idx, :self.idx]), x)
+        return joint_ll/marginal_ll
 
     def log_likelihood(self, x):
         return np.log(self.likelihood(x))
 
-    def __call__(self, x):
-        return self.likelihood(x)
-
     def sample(self, n):
         comp = random.categorical(
-                self._key,
+                seed(),
                 np.log(self._pi),
                 shape=(n,))
-        ran = random.normal(self._key, (n, 1, self.dim))
+        ran = random.normal(seed(), (n, 1, self.dim))
         samples = self._mu[comp].reshape(n, 1, -1) + ran @ self._sig[comp]
         return samples
 
@@ -140,11 +168,11 @@ class GMM:
         sig = np.repeat(sig, n, 0)
         sig = np.maximum(sig, 0.)
         comp = random.categorical(
-                self._key,
+                seed(),
                 np.log(pi),
                 axis=1).reshape(-1)
         offset = mu[_idx_help, comp]
-        ran = random.normal(self._key, (n*reps, 1, self.dim-idx))
+        ran = random.normal(seed(), (n*reps, 1, self.dim-idx))
         ran = (ran @ sig[_idx_help, comp]).reshape(-1, mu.shape[-1])
         samples = offset + ran
         return samples
@@ -157,55 +185,61 @@ class GMM:
         weighted_mean = np.sum(pi * mu.reshape(x.shape[0], -1), 1)
         return weighted_mean
 
-    def gradient_update(self, x, alpha=1e-2):
-        weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
-        weights = vmap(weight_func)(x)
-        weights = (weights/np.sum(weights,1).reshape(-1,1))
-        #n_cov = np.stack([empirical_cov(x, self._mu[i].reshape(1,-1), weights[:,i]) for i in range(self.n_components)], 0)
-        
-        ll = lambda _p, _x: np.log(vmap(gmm_softmax_pi, in_axes=(None,0), out_axes=0)(_p, _x))
-        value, grads = mean_grad(ll, self.params, x)
-        grad_pi = grads[0]
-        grad_mu = grads[1]
-        grad_var = grads[2]
-        
-        self._pi = weights.sum(0)/weights.sum()
-        self._mu += alpha * grad_mu
-        self._var += alpha * grad_var
-        #self._var = (1-alpha) * self._var + alpha * n_cov
+    # def gradient_update(self, x, alpha=1e-2):
+    #     weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
+    #     weights = vmap(weight_func)(x)
+    #     weights = (weights/np.sum(weights,1).reshape(-1,1))
+    #     #n_cov = np.stack([empirical_cov(x, self._mu[i].reshape(1,-1), weights[:,i]) for i in range(self.n_components)], 0)
+    #     
+    #     ll = lambda _p, _x: np.log(vmap(gmm_softmax_pi, in_axes=(None,0), out_axes=0)(_p, _x))
+    #     value, grads = mean_grad(ll, self.params, x)
+    #     grad_pi = grads[0]
+    #     grad_mu = grads[1]
+    #     grad_var = grads[2]
+    #     
+    #     self._pi = weights.sum(0)/weights.sum()
+    #     self._mu += alpha * grad_mu
+    #     self._var += alpha * grad_var
+    #     #self._var = (1-alpha) * self._var + alpha * n_cov
 
-        return grads
+    #     return grads
 
     def _smoothed_avg(self, x0, x1, alpha):
         return (1-alpha) * x0 + alpha * x1
 
-    def update_parameters(self, x, alpha=1., max_iters=3):
+    def update_parameters(self, x, weights, alpha=1., max_iters=3):
         assert not np.any(np.isnan(x))
         converged = False
         iters = 0
         while not converged:
-            converged = self.em_update(x, alpha)
+            converged = self.em_update(x, weights, alpha)
             if iters == max_iters:
                 break
             if iters >= 0:
                 iters += 1
 
-    def em_update(self, x, alpha=5e-2):
+    def em_update(self, x, particle_weights, alpha=5e-2):
         assert not np.any(np.isnan(x))
         weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
         weights = vmap(weight_func)(x)
+        weights += 1e-20
+        # print(weights)
         weights = (weights/np.sum(weights,1).reshape(-1,1))
-        mu = np.stack([empirical_mu(x, weights[:,i].reshape(-1,1)) for i in range(self.n_components)], 0)
-        n_cov = np.stack([empirical_cov(x, mu[i].reshape(1,-1), weights[:,i]) for i in range(self.n_components)], 0)
-        
+        mu = np.stack(
+            [empirical_mu(x, (weights[:,i] * np.exp(particle_weights)).reshape(-1,1)) 
+            for i in range(self.n_components)], 0)
+        n_cov = np.stack(
+            [empirical_cov(x, mu[i].reshape(1,-1), weights[:,i] * np.exp(particle_weights).reshape(-1)) 
+            for i in range(self.n_components)], 0)
         converged = np.all(np.isclose(self._pi, weights.sum(0)/weights.sum())) \
                 and np.all(np.isclose(self._mu, mu)) \
                 and np.all(np.isclose(self._var, n_cov))
-
+        weights *= np.exp(particle_weights).reshape(-1,1)
         self._pi = self._smoothed_avg(self._pi, weights.sum(0)/weights.sum(), alpha)
         self._mu =  self._smoothed_avg(self._mu, mu, alpha)
         self._var = self._smoothed_avg(self._var, n_cov, alpha)
-        
+        # print(self._var)
+        assert not np.any(np.isnan(self._mu))
         return converged
 
 if __name__ == "__main__":
