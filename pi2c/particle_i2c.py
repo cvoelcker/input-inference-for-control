@@ -206,13 +206,13 @@ class ParticleI2cCell(nn.Module):
         """
         """
         resampled_particles = []
-        for p, w in particles, weights:
+        for p, w in zip(particles, weights):
             self.key, sk = random.split(self.key)
             samples = random.gumbel(sk, (len(p), len(p)))
             choices = np.argmax(samples + w.reshape(-1,1), 0)
             resampled_particles.append(p[choices])
         resampled_particles = np.concatenate(resampled_particles, 0)
-        self.policy.update_parameters(resampled_particles, np.zeros_like(weights))
+        self.policy.update_parameters(resampled_particles, np.zeros_like(resampled_particles[:, 1]))
 
     def current_backward_costs(self):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
@@ -325,7 +325,7 @@ class ParticleI2cGraph():
             alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
             if update_alpha:
                 self.alpha = alpha
-                print(alpha)
+                print(self.alpha)
             if self.policy_type == 'VSMC':
                 losses.append(loss.detach().numpy())
         if self.policy_type == 'VSMC':
@@ -398,11 +398,15 @@ class ParticleI2cGraph():
         if self.policy_type == 'mixture':
             particles = np.array(particles)
             weights = (np.array(weights) - np.max(weights, -1).reshape(*np.array(weights).shape[:2], 1))
-            weights = np.array(list(reversed(weights)))
+            weights = np.flip(weights, 1)
             for i, c in tqdm(list(enumerate(self.cells))):
                 c.update_policy(particles[:, i], weights[:, i])
             if update_alpha:
-                alpha, converged = self._quadratic_alpha_update(self.alpha)
+                np_particles = np.concatenate(np.concatenate(particles, -2), 0)
+                np_weights = np.concatenate(np.concatenate(np.flip(jax.nn.softmax(weights), 1), -1), 0)
+                alpha = self._score_matching_alpha_update(np_particles, np_weights)
+                converged = False
+                # alpha, converged = self._quadratic_alpha_update(self.alpha)
             else:
                 converged = False
                 alpha = self.alpha

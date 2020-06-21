@@ -237,6 +237,7 @@ class GMM:
         self._pi = self._smoothed_avg(self._pi, weights.sum(0)/weights.sum(), alpha)
         self._mu =  self._smoothed_avg(self._mu, mu, alpha)
         self._var = self._smoothed_avg(self._var, n_cov, alpha)
+        # print(self._var)
         assert not np.any(np.isnan(self._mu))
         return converged
 
