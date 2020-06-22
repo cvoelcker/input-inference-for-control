@@ -149,16 +149,12 @@ class ParticleI2cCell(nn.Module):
         elif self.strategy == 'mixture':
             self.particles = np.concatenate((particles, new_u), 1)[samples]
         self.new_particles = self.env.sample(particles[samples].T, new_u[samples].T).T
-        # print(self.particles.mean(0))
-        # print(self.policy.log_likelihood(self.particles).mean())
         return self.new_particles, self.particles, failed
 
     def greedy_backward_reweighing(self, particles, samples, weights):
         if self.strategy == 'mixture':
             samples = np.take(self.samples, samples)
         elif self.strategy == 'VSMC':
-            print(torch.gather(self.log_weights, 0, torch.tensor(samples)))
-            print(samples)
             self.log_weights = self.log_weights[samples] + weights
         return self.particles[samples], samples, self.log_weights
 
@@ -328,20 +324,14 @@ class ParticleI2cGraph():
         update_alpha = (_iter == (max_iter-1))
         for _iter in tqdm(range(max_iter)):
             forward_particles, weights, backward_particles = self._expectation(_iter, run_bimodal_exp)
-            alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
+            alpha, loss, converged = self._maximization(weights, backward_particles, update_alpha=update_alpha)
             if update_alpha:
                 self.alpha = alpha
             if self.policy_type == 'VSMC':
                 losses.append(loss.detach().numpy())
-        if self.policy_type == 'VSMC':
-            np.savetxt('{}/losses_{}.npy'.format(log_dir, self.log_id), losses)
-            for c in self.cells:
-                c.save_state('{}/model_state_{}_'.format(log_dir, self.log_id) + '{}.torch')
         self.log_id += 1
         print()
         print(self.alpha)
-        print(particles[0][0].mean(0))
-        print(particles[0][0].var(0))
         return self.alpha, loss, forward_particles, weights, backward_particles
 
     def _expectation(self, iteration, run_bimodal_exp):
@@ -353,14 +343,16 @@ class ParticleI2cGraph():
         """
         # sample initial x from the systems inital distribution
         all_weights = []
+        all_forward_particles = []
         all_particles = []
         # run per cell loop
         for i in tqdm(range(self.batch_size)):
-            final_sample, all_forward_particles = self.simulate_forward(self._alpha, run_bimodal_exp)
+            final_sample, forward_particles = self.simulate_forward(self._alpha, run_bimodal_exp)
+            all_forward_particles.append(forward_particles)
             if self.policy_type == 'VSMC':
-                final_weights = self._alpha * self.cost(samples, torch.zeros((len(final_sample), 1)))
+                final_weights = self._alpha * self.cost(final_sample, torch.zeros((len(final_sample), 1)))
             elif self.policy_type == 'mixture':
-                final_weights = self._alpha * self.cost(samples, np.zeros((len(final_sample), 1)))
+                final_weights = self._alpha * self.cost(final_sample, np.zeros((len(final_sample), 1)))
             weights_backward, particles_backward = self.simulate_backwards(final_sample, final_weights)
             all_particles.append(particles_backward)
             all_weights.append(weights_backward)
@@ -379,8 +371,8 @@ class ParticleI2cGraph():
         failed = False
         iteration = 0
         for c in self.cells:
-            all_particles.append(particles)
             particles, sampled, failed = c.forward_pass(particles, iteration, failed, alpha)
+            all_particles.append(c.particles)
         return particles, all_particles
 
     def simulate_backwards(self, samples, weights):
@@ -420,11 +412,7 @@ class ParticleI2cGraph():
                 np_weights = np.concatenate(np.concatenate(np.flip(jax.nn.softmax(weights), 1), -1), 0)
                 alpha = self._score_matching_alpha_update(np_particles, np_weights)
                 converged = False
-                print()
-                print()
-                print(alpha)
                 alpha, converged = self._quadratic_alpha_update(self.alpha)
-                print(alpha)
             else:
                 converged = False
                 alpha = self.alpha
@@ -496,7 +484,6 @@ class ParticleI2cGraph():
                 print(self.sigXi0)
                 raise ValueError("{} <= 0.0".format(alpha_update))
 
-            print('New alpha {}'.format(alpha_update))
             return alpha_update, np.isclose(alpha, alpha_update)
     
     def _score_matching_alpha_update(self, x, weights):
@@ -507,4 +494,4 @@ class ParticleI2cGraph():
         return False
 
     def get_policy(self, x, i):
-        return self.cells[i].policy(x)
+        return self.cells[i].policy(x, 1)

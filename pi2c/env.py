@@ -54,7 +54,7 @@ class BaseSim(object):
         """
         SUPER HACKY, FIX with Joe!
         """
-        x_cur = self.x.copy()
+        x_cur = self.x
         self.x = x
         sample = self.forward(u)
         self.x = x_cur
@@ -111,14 +111,14 @@ class TorchLinearDisturbed(env_def.LinearDef, BaseSim):
     def __init__(self, duration):
         self.duration = duration
         self.a = torch.Tensor(self.a.reshape((-1, 1))) # give me strength...
-        self.sig_x_noise = 0.01
+        self.sig_x_noise = 0.001
         self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
         self.A = torch.Tensor(self.A)
         self.B = torch.Tensor(self.B)
         self.normal = MultivariateNormal(torch.zeros(self.dim_x), torch.eye(self.dim_x) * self.sig_x_noise)
 
     def init_env(self, randomized=False):
-        self.x = np.copy(self.x0)
+        self.x = torch.tensor(np.copy(self.x0)).float()
         return self.x
 
     def forward(self, u):
@@ -136,7 +136,7 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
     def __init__(self, duration):
         self.duration = duration
         self.a = self.a.reshape((-1, 1)) # give me strength...
-        self.sig_x_noise = 0.1
+        self.sig_x_noise = 0.001
         self.noise_pdf = sc.stats.multivariate_normal(np.zeros(2), self.sig_x_noise)
         self.key = random.PRNGKey(0)
 

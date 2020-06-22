@@ -11,6 +11,7 @@ from pi2c.cost_function import QRCost, StaticQRCost, Cost2Prob
 import pi2c.particle_i2c
 from pi2c.particle_i2c import ParticleI2cGraph#, ParticlePlotter
 from pi2c.utils import get_particle_i2c_config
+from pi2c.particle_visualization import ParticlePlotter
 
 
 def build_quadratic_q(dim_x, dim_u, q=None, r=None):
@@ -64,7 +65,7 @@ def build_experiment(config):
 
 
 def build_logger(graph, config):
-    logger = None
+    logger = ParticlePlotter(graph, config)
     return logger
 
 
@@ -82,5 +83,13 @@ if __name__ == "__main__":
     for i in tqdm(range(epochs)):
         env.init_env()
         alpha, loss, forward_particles, weights, backward_particles = graph.run(i, steps_per_log, log_dir, config.ENVIRONMENT.init_state_bimodal)
-        logger.log(alpha, loss, forward_particles, weights, backward_particles)
-        #TODO: call logger here
+        logger.plot_all(
+            alpha, 
+            forward_particles, 
+            backward_particles, 
+            weights, 
+            config.ENVIRONMENT.env_name, 
+            env, 
+            cost, 
+            repeats=10, 
+            random_starts=True)
