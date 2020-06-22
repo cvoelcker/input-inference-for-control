@@ -324,9 +324,10 @@ class ParticleI2cGraph():
     def run(self, it, max_iter, log_dir='log/', run_bimodal_exp=False):
         _iter = 0
         losses = []
+        # alpha is updated only in the last timestep to prevent superfluous changes before policy convergence
+        update_alpha = (_iter == (max_iter-1))
         for _iter in tqdm(range(max_iter)):
-            weights, particles = self._expectation(_iter, run_bimodal_exp)
-            update_alpha = _iter == (max_iter-1)
+            forward_particles, weights, backward_particles = self._expectation(_iter, run_bimodal_exp)
             alpha, loss, converged = self._maximization(weights, particles, update_alpha=update_alpha)
             if update_alpha:
                 self.alpha = alpha
@@ -341,7 +342,7 @@ class ParticleI2cGraph():
         print(self.alpha)
         print(particles[0][0].mean(0))
         print(particles[0][0].var(0))
-        return self.alpha
+        return self.alpha, loss, forward_particles, weights, backward_particles
 
     def _expectation(self, iteration, run_bimodal_exp):
         """Runs the forward, backward smoothing algorithm to estimate the
@@ -355,15 +356,15 @@ class ParticleI2cGraph():
         all_particles = []
         # run per cell loop
         for i in tqdm(range(self.batch_size)):
-            samples, all_samples = self.simulate_forward(self._alpha, run_bimodal_exp)
+            final_sample, all_forward_particles = self.simulate_forward(self._alpha, run_bimodal_exp)
             if self.policy_type == 'VSMC':
-                final_weights = self._alpha * self.cost(samples, torch.zeros((len(samples), 1)))
+                final_weights = self._alpha * self.cost(samples, torch.zeros((len(final_sample), 1)))
             elif self.policy_type == 'mixture':
-                final_weights = self._alpha * self.cost(samples, np.zeros((len(samples), 1)))
-            weights_backward, particles_backward = self.simulate_backwards(samples, final_weights)
+                final_weights = self._alpha * self.cost(samples, np.zeros((len(final_sample), 1)))
+            weights_backward, particles_backward = self.simulate_backwards(final_sample, final_weights)
             all_particles.append(particles_backward)
             all_weights.append(weights_backward)
-        return all_weights, all_particles
+        return all_forward_particles, all_weights, all_particles
 
     def simulate_forward(self, alpha, run_bimodal_exp):
         all_particles = []
@@ -378,8 +379,8 @@ class ParticleI2cGraph():
         failed = False
         iteration = 0
         for c in self.cells:
+            all_particles.append(particles)
             particles, sampled, failed = c.forward_pass(particles, iteration, failed, alpha)
-            all_particles.append(sampled)
         return particles, all_particles
 
     def simulate_backwards(self, samples, weights):

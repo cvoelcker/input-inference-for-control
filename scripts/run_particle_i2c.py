@@ -74,12 +74,13 @@ if __name__ == "__main__":
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     graph, env, cost = build_experiment(config)
-    logger = build_logger(graph, None)
+    logger = build_logger(graph, config)
 
     steps_per_log = config.LOGGING.log_every
     epochs = config.LOGGING.em_steps // steps_per_log
 
     for i in tqdm(range(epochs)):
         env.init_env()
-        graph.run(i, steps_per_log, log_dir, config.ENVIRONMENT.init_state_bimodal)
+        alpha, loss, forward_particles, weights, backward_particles = graph.run(i, steps_per_log, log_dir, config.ENVIRONMENT.init_state_bimodal)
+        logger.log(alpha, loss, forward_particles, weights, backward_particles)
         #TODO: call logger here
