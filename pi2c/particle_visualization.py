@@ -96,7 +96,7 @@ class ParticlePlotter():
                 u = self.graph.get_policy(x.reshape(1,-1), i).reshape(1,1)
                 us.append(u)
                 costs.append(cost(x.reshape(1,-1), u))
-                x = eval_env.forward(u)
+                x = eval_env.sample(x, u)
         if self.policy_type == 'VSMC':
             costs = torch.tensor(costs).detach().numpy().reshape(repeats, -1)
             us = torch.tensor(us).detach().numpy().reshape(repeats, -1)
@@ -114,8 +114,8 @@ class ParticlePlotter():
         plt_help_x = np.arange(self.graph.T)
         costs, us = self.eval_controler(eval_env, cost, repeats=repeats, random_starts=random_starts)
         
-        mean_c, sig_c, sig_upper_c, sig_lower_c = get_mean_sig_bounds(costs, 0, np.ones_like(costs), 2)
-        mean_u, sig_u, sig_upper_u, sig_lower_u = get_mean_sig_bounds(us, 0, np.ones_like(us), 2)
+        mean_c, sig_c, sig_upper_c, sig_lower_c = get_mean_sig_bounds(costs, 0, np.ones_like(costs), 1)
+        mean_u, sig_u, sig_upper_u, sig_lower_u = get_mean_sig_bounds(us, 0, np.ones_like(us), 1)
         # plot costs
         ax[0].fill_between(plt_help_x, sig_lower_c, sig_upper_c, color='C0', alpha=0.1)
         for i in range(repeats):
@@ -143,14 +143,14 @@ class ParticlePlotter():
 
         plt.clf()
         fig, axs = plt.subplots(3)
-        fig.suptitle('Particle I2C training ' + run_name)
+        fig.suptitle(f'Particle I2C training {run_name} {self.i}')
         for i in range(2):
             self.plot_particle_forward_backwards_cells(f_particles, b_particles, weights, i, fig=axs[i])
         self.plot_particle_forward_backwards_cells(f_particles, b_particles, weights, 2, 'u',fig=axs[2])
         fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for suptitle
         fig.savefig(f'plots/{self.log_dir}/particles_{run_name}_{self.i}.png')
         fig, axs = plt.subplots(2)
-        fig.suptitle('Particle I2C controler evaluation ' + run_name)
+        fig.suptitle(f'Particle I2C controler evaluation {run_name} {self.i}')
         self.plot_controler(eval_env, cost, repeats, random_starts, fig=axs)
         fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for uptitle
         fig.savefig(f'plots/{self.log_dir}/controler_{run_name}_{self.i}.png')
@@ -160,7 +160,7 @@ class ParticlePlotter():
 
 def get_mean_sig_bounds(arr, dim, weights, sig_multiple=1.):
     mean_arr = np.expand_dims(np.average(arr, dim, weights), dim)
-    sig_arr = np.mean(weights * (arr - mean_arr) ** 2, dim)
+    sig_arr = np.sqrt(np.mean(weights * (arr - mean_arr) ** 2, dim))
     mean_arr = mean_arr.squeeze()
     sig_upper_arr = mean_arr + sig_arr * sig_multiple
     sig_lower_arr = mean_arr - sig_arr * sig_multiple
