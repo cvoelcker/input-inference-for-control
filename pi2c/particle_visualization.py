@@ -88,9 +88,9 @@ class ParticlePlotter():
     def eval_controler(self, eval_env, cost, repeats=1000, random_starts=True):
         costs = []
         us = []
-        x = eval_env.init_env(randomized=random_starts)
         print('Evaluating envs for plotting')
         for i in tqdm(range(repeats)):
+            x = eval_env.init_env(randomized=random_starts)
             for i in range(self.graph.T):
                 u = self.graph.get_policy(x.reshape(1,-1), i).reshape(1,1)
                 us.append(u)
