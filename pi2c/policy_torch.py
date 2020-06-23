@@ -54,6 +54,9 @@ class PolicyWrapper(nn.Module):
     def forward(self, x, n):
         return self.p(x, n)
 
+    def conditional_mean(self, x, n):
+        return self.p.conditional_mean(x, n)
+
 
 class LogLinearPolicy(PolicyWrapper):
     def __init__(self, inp_dim, out_dim, var_init):

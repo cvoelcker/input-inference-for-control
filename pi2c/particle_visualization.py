@@ -153,6 +153,7 @@ class ParticlePlotter():
         self.plot_controler(eval_env, cost, repeats, random_starts, fig=axs)
         fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # fixes for uptitle
         fig.savefig(f'plots/{self.log_dir}/controler_{run_name}_{self.i}.png')
+        plt.close('all')
         self.i += 1
 
 

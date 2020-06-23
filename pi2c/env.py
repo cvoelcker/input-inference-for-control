@@ -119,6 +119,8 @@ class TorchLinearDisturbed(env_def.LinearDef, BaseSim):
 
     def init_env(self, randomized=False):
         self.x = torch.tensor(np.copy(self.x0)).float()
+        if randomized:
+            self.x += self.normal.sample().reshape(self.x.shape)
         return self.x
 
     def forward(self, u):
@@ -142,6 +144,9 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
 
     def init_env(self, randomized=False):
         self.x = np.copy(self.x0)
+        if randomized:
+            self.key, sk = random.split(self.key)
+            self.x += random.normal(sk, self.x.shape)
         return self.x
 
     def forward(self, u):
