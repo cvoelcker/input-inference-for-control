@@ -11,10 +11,6 @@ python scripts/run_particle_i2c.py --num-particles 500 --num-policy-samples 50 -
 ## linear high uncertainty
 python scripts/run_particle_i2c.py --num-particles 100 --num-policy-samples 10 --batch-size 16 --horizon 100 --log-every 1 --em-steps 100 --env-name LinearDisturbed --type mixture --smoothing smoothing --init-alpha 0.00001 --components 1 --init-policy-variance 10000 --init-state-var 1. --log-dir mixture_linear_large_var
 
-# ## pendulum
-# python scripts/run_particle_i2c.py --num-particles 100 --num-policy-samples 10 --batch-size 16 --horizon 100 --log-every 1 --em-steps 100 --env-name PendulumDisturbed --type mixture --smoothing smoothing --init-alpha 0.00001 --components 4 --init-policy-variance 10000 --log-dir mixture_pendulum_s
-# python scripts/run_particle_i2c.py --num-particles 500 --num-policy-samples 50 --batch-size 16 --horizon 100 --log-every 1 --em-steps 100 --env-name PendulumDisturbed --type mixture --smoothing smoothing --init-alpha 0.00001 --components 4 --init-policy-variance 10000 --log-dir mixture_pendulum_l
-
 
 #### VSMC Evaluations
 
