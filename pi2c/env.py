@@ -11,6 +11,7 @@ import torch
 from torch.distributions import MultivariateNormal
 
 import pi2c.env_def as env_def
+import pi2c.env_autograd as env_autograd
 from pi2c import jax_gmm
 
 
@@ -134,6 +135,7 @@ class TorchLinearDisturbed(env_def.LinearDef, BaseSim):
         mu = _x - x1
         return self.normal.log_prob(mu.T)
 
+
 class LinearDisturbed(env_def.LinearDef, BaseSim):
 
     def __init__(self, duration):
@@ -161,19 +163,56 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         ll = jax_gmm.vec_log_normal_pdf(_x.T, np.eye(self.dim_x) * self.sig_x_noise, x1.T)
         return ll
 
+
 class PendulumKnown(env_def.PendulumKnown, BaseSim):
 
     def __init__(self, duration):
         self.duration = duration
+        self.key = random.PRNGKey(0)
 
-    def init_env(self):
+    def init_env(self, init_state_var=1., randomized=True):
+        self.key, sk = random.split(self.key)
         self.x = self.x0.squeeze()
+        if randomized:
+            self.x += self.sigV.dot(random.normal(sk, self.x.shape))
         return self.x
 
     def forward(self, u):
-        disturbance = self.sigV.dot(np.random.randn(self.dim_x,))
+        self.key, sk = random.split(self.key)
+        disturbance = self.sigV.dot(random.normal(sk, self.x.shape))
         self.x = self.dynamics(self.x, u) + disturbance
         return self.x
+
+    def log_likelihood(self, x0, u, x1):
+        _x = self.dynamics(x0, u)
+        ll = jax_gmm.vec_log_normal_pdf(_x.T, self.sigV.dot(np.eye(self.dim_x)), x1.T)
+        return ll
+
+
+class TorchPendulumKnown(env_def.PendulumKnown, BaseSim):
+
+    def __init__(self, duration):
+        self.duration = duration
+        self.key = random.PRNGKey(0)
+        self.sigV = torch.tensor(self.sigV).float()
+        self.normal = MultivariateNormal(torch.zeros(self.dim_x), self.sigV)
+
+    def init_env(self, init_state_var=1., randomized=False):
+        self.x = torch.tensor(np.copy(self.x0)).float()
+        if randomized:
+            dist = MultivariateNormal(self.x.T, torch.eye(self.dim_x) * init_state_var)
+            return dist.sample().T
+        return self.x
+
+    def forward(self, u):
+        disturbance = self.normal.sample((self.x.shape[1],)).T
+        self.x = env_autograd.pendulum_dynamics_torch(self.x, u) + disturbance
+        return self.x
+
+    def log_likelihood(self, x0, u, x1):
+        _x = env_autograd.pendulum_dynamics_torch(x0, u) - x1
+        return self.normal.log_prob(_x.T)
+
 
 class PendulumLinearObservationKnown(env_def.PendulumLinearObservationKnown, BaseSim):
 
@@ -271,6 +310,7 @@ def make_env(exp):
         "LinearDisturbed": LinearDisturbed,
         "TorchLinearDisturbed": TorchLinearDisturbed,
         "PendulumKnown": PendulumKnown,
+        "TorchPendulumKnown": TorchPendulumKnown,
         "PendulumLinearObservationKnown": PendulumLinearObservationKnown,
         "CartpoleKnown": CartpoleKnown,
         "QuanserCartpoleKnown": QuanserCartpoleKnown,

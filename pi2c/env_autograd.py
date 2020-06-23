@@ -1,5 +1,7 @@
-import autograd.numpy as np
+import math
+import jax.numpy as np
 from autograd import jacobian
+import torch
 
 def pendulum_dynamics(x, u):
     dt = 0.05
@@ -14,6 +16,21 @@ def pendulum_dynamics(x, u):
     x_dot = x[1] + th_dot_dot * dt
     x_pos = x[0] + x_dot * dt
     x2 = np.vstack((x_pos, x_dot)).reshape(x.shape)
+    return x2
+
+def pendulum_dynamics_torch(x, u):
+    dt = 0.05
+    m = 1.
+    l = 1.
+    d = 1e-2 # damping
+    g = 9.80665
+    u_mx = 2.
+    u = torch.clamp(u, -u_mx, u_mx)
+    th_dot_dot = -3.0 * g / (2 * l) * torch.sin(x[0] + math.pi) + d * x[1]
+    th_dot_dot += 3.0 / (m * l**2) * u.squeeze()
+    x_dot = x[1] + th_dot_dot * dt
+    x_pos = x[0] + x_dot * dt
+    x2 = torch.stack((x_pos, x_dot)).reshape(x.shape)
     return x2
 
 pendulum_dydx = jacobian(pendulum_dynamics, 0)
