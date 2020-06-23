@@ -25,6 +25,7 @@ class ParticlePlotter():
         if not os.path.exists('plots/' + self.log_dir):
             os.makedirs('plots/' + self.log_dir)
         self.policy_type = config.POLICY.type
+        self.init_state_var = config.ENVIRONMENT.init_state_var
         self.i = 0
 
     def clean(self, arr):
@@ -90,12 +91,12 @@ class ParticlePlotter():
         us = []
         print('Evaluating envs for plotting')
         for i in tqdm(range(repeats)):
-            x = eval_env.init_env(randomized=random_starts)
+            x = eval_env.init_env(self.init_state_var, randomized=random_starts)
             for i in range(self.graph.T):
                 u = self.graph.get_policy(x.reshape(1,-1), i).reshape(1,1)
                 us.append(u)
-                x = eval_env.forward(u)
                 costs.append(cost(x.reshape(1,-1), u))
+                x = eval_env.forward(u)
         if self.policy_type == 'VSMC':
             costs = torch.tensor(costs).detach().numpy().reshape(repeats, -1)
             us = torch.tensor(us).detach().numpy().reshape(repeats, -1)
