@@ -72,14 +72,15 @@ class ParticlePlotter():
 
         fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C0', alpha=.05)
         fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C1', alpha=.1)
-        fig.plot(mean_f, color='C0')
-        fig.plot(mean_b, color='C1')
+        l1, = fig.plot(mean_f, color='C0')
+        l2, = fig.plot(mean_b, color='C1')
         fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01, color='C0')
         fig.scatter(time_x_loc_b, b_particles.flatten(), b_weighing, color='C1')
 
         fig.set_xlabel('Timestep')
         fig.set_ylabel(dim_name + str(dim))
         fig.set_title('Forward/backward particles over ' + dim_name + str(dim))
+        fig.legend([l1, l2], ['Forward particles', 'Backward particles'])
         
         return fig
 
