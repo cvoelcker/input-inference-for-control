@@ -6,6 +6,8 @@ from torch.distributions import Normal
 def get_policy(policy_type, inp_dim, out_dim, var_init, params):
     if policy_type == 'LogLinear':
         return LogLinearPolicy(inp_dim, out_dim, var_init)
+    elif policy_type == 'LogMlp':
+        return LogMlpPolicy(inp_dim, out_dim, var_init, [5,5])
 
 
 def init_weights(m):
