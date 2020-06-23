@@ -41,6 +41,11 @@ class Policy(nn.Module):
         samples = Normal(0, 1).sample((n * batch_dim,)).view(-1, self.out_dim)
         return mu + samples * var
 
+    def conditional_mean(self, x, n):
+        batch_dim = x.shape[0]
+        mu = self.mu(x, n)
+        return mu
+
 
 class PolicyWrapper(nn.Module):
     def __init__(self):

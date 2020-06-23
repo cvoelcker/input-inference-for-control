@@ -177,9 +177,9 @@ class GMM:
         samples = offset + ran
         return samples
 
-    def conditional_mean(self, x, idx):
-        x = x.reshape(-1, idx)
-        pi, mu, var = self.condition(x, idx)
+    def conditional_mean(self, x, n):
+        x = x.reshape(-1, self.idx)
+        pi, mu, var = self.condition(x, self.idx)
         if not np.isclose(np.sum(pi), 1.):
             pi = self._pi
         weighted_mean = np.sum(pi * mu.reshape(x.shape[0], -1), 1)

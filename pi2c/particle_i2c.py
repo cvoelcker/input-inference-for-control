@@ -494,4 +494,4 @@ class ParticleI2cGraph():
         return False
 
     def get_policy(self, x, i):
-        return self.cells[i].policy(x, 1)
+        return self.cells[i].policy.conditional_mean(x, 1)
