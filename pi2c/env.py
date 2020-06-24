@@ -180,13 +180,13 @@ class PendulumKnown(env_def.PendulumKnown, BaseSim):
     def to_polar(self, x):
         x0 = np.arctan2(x[0, :], x[1, :])
         x1 = x[2, :]
-        return np.vstack([x0, x1])
+        return np.stack([x0, x1], 0)
 
     def to_euclidean(self, x):
         x0 = np.sin(x[0, :])
         x1 = np.cos(x[0, :])
         x2 = x[1, :]
-        return np.vstack([x0, x1, x2])
+        return np.stack([x0, x1, x2], 0)
 
     def init_env(self, init_state_var=1., randomized=True):
         self.key, sk = random.split(self.key)
@@ -203,7 +203,11 @@ class PendulumKnown(env_def.PendulumKnown, BaseSim):
         return self.x
 
     def transform_for_plot(self, x):
-        return self.to_polar(x.T).T
+        u = x[..., -1:]
+        x = x[..., :-1]
+        x = self.to_polar(x.T).T
+        x = np.concatenate([x,u], -1)
+        return x
 
     def log_likelihood(self, x0, u, x1):
         _x = self.dynamics(self.to_polar(x0), u)
@@ -244,7 +248,10 @@ class TorchPendulumKnown(env_def.PendulumKnown, BaseSim):
         return self.to_euclidean(self.x)
 
     def transform_for_plot(self, x):
-        return self.to_polar(x.T).T
+        u = x[..., -1]
+        x = x[..., :-1]
+        x = self.to_polar(x.T).T
+        return torch.concatenate([x,u], -1)
 
     def log_likelihood(self, x0, u, x1):
         _x = env_autograd.pendulum_dynamics_torch(self.to_polar(x0), u) - self.to_polar(x1)
