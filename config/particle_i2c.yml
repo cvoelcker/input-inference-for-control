@@ -10,7 +10,8 @@ ENVIRONMENT:
     cost:
         shape: quadratic # currently, only quadratic cost functions are implemened
         Q:
-                - 100.
+                - 10.
+                - 1.
         R:
                 - 1.
 

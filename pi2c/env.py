@@ -146,7 +146,7 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         self.key = random.PRNGKey(0)
 
     def init_env(self, init_state_var=1., randomized=False):
-        self.x = np.copy(self.x0)
+        self.x = self.x0.copy()
         if randomized:
             self.key, sk = random.split(self.key)
             self.x += random.normal(sk, self.x.shape) * init_state_var
