@@ -1,9 +1,10 @@
 from tqdm import tqdm
 
 import jax.numpy as np
-import numpy
+from jax.scipy import special
 import jax
 from jax import grad, jit, vmap, value_and_grad, random
+import numpy
 import matplotlib.pyplot as plt
 
 
@@ -220,11 +221,9 @@ class GMM:
 
     def em_update(self, x, particle_weights, alpha=5e-2):
         assert not np.any(np.isnan(x))
-        weight_func = lambda _x: vmap(gaussian_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
+        weight_func = lambda _x: vmap(log_normal_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
         weights = vmap(weight_func)(x)
-        weights += 1e-20
-        # print(weights)
-        weights = (weights/np.sum(weights,1).reshape(-1,1))
+        weights = np.exp((weights - special.logsumexp(weights,1).reshape(-1,1)))
         mu = np.stack(
             [empirical_mu(x, (weights[:,i] * np.exp(particle_weights)).reshape(-1,1)) 
             for i in range(self.n_components)], 0)
