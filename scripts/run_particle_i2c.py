@@ -7,14 +7,14 @@ import numpy as np
 
 from pi2c.env import make_env
 from pi2c.model import make_env_model
-from pi2c.cost_function import QRCost, StaticQRCost, Cost2Prob
+from pi2c.cost_function import QRCost, StaticQRCost, Cost2Prob, PendulumCost
 import pi2c.particle_i2c
 from pi2c.particle_i2c import ParticleI2cGraph#, ParticlePlotter
 from pi2c.utils import get_particle_i2c_config
 from pi2c.particle_visualization import ParticlePlotter
 
 
-def build_quadratic_q(dim_x, dim_u, q=None, r=None):
+def build_q(q_type, dim_x, dim_u, q=None, r=None):
     Q = np.eye(dim_x)
     R = np.eye(dim_u)
     if q is None: 
@@ -32,8 +32,13 @@ def build_quadratic_q(dim_x, dim_u, q=None, r=None):
     # dynamic trajectory needs to be implemented here
     x = np.zeros_like(q).reshape(1, -1)
     u = np.array([[0.]])
-    cost = StaticQRCost(Q, R, x, u)
-    prob = Cost2Prob(cost)
+
+    if q_type == 'quadratic':
+        cost = StaticQRCost(Q, R, x, u)
+        prob = Cost2Prob(cost)
+    elif q_type == 'pendulum':
+        cost = PendulumCost(Q, R, x, u)
+        prob = Cost2Prob(cost)
     return cost, prob
 
 
@@ -60,7 +65,7 @@ def build_experiment(config):
     env = build_env(config.ENVIRONMENT.env_name, config.ENVIRONMENT.horizon)
     print(env)
     print(env.dim_x)
-    cost, _ = build_quadratic_q(env.dim_x, env.dim_u, config.ENVIRONMENT.cost.Q, config.ENVIRONMENT.cost.R)
+    cost, _ = build_q(config.ENVIRONMENT.cost.shape, 2, env.dim_u, config.ENVIRONMENT.cost.Q, config.ENVIRONMENT.cost.R)
     graph = build_particle_graph(config)
     graph.set_env(env, cost)
     graph.set_policy(config.POLICY.type, config.POLICY.smoothing, config.POLICY)

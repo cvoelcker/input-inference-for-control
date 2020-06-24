@@ -1,12 +1,15 @@
-import numpy as np
 from abc import ABC, abstractmethod
 
-# import jax.numpy as np
+import jax.numpy as np
 from jax.random import PRNGKey, gumbel, split
 from jax import vmap
 
+import numpy as onp
+
 import torch
 from torch.distributions import Gumbel
+
+from pi2c.utils import to_polar, to_polar_torch
 
 class EnvCostFunction(ABC):
     normalized = False
@@ -59,7 +62,7 @@ class StaticQRCost(QRCost):
 
     def __init__(self, Q, R, xg, ug):
         super().__init__(Q, R)
-        self.zg = torch.Tensor(np.concatenate([xg, ug], 1))
+        self.zg = torch.Tensor(onp.concatenate([xg, ug], 1))
         self.dim = self.zg.size()[1]
         self.QR = torch.zeros((self.dim, self.dim))
         self.QR[:xg.size,:xg.size] = torch.Tensor(Q)
@@ -101,6 +104,51 @@ class StaticQRCost(QRCost):
             float: quadratic cost
         """
         return -np.diag(x @ self.QR.numpy() @ x.T)
+
+
+class PendulumCost(StaticQRCost):
+
+    def _cost(self, x, u, xg, ug):
+        _x = to_polar_torch(x)
+        _x = _x - xg
+        _u = u - ug
+
+        Q_cost = torch.diag(_x @ self.Q @ _x.T)
+        R_cost = torch.diag(_u @ self.R @ _u.T)
+        return -(Q_cost + R_cost)
+
+    def cost_jax(self, x):
+        """Replicates the cost function to enable jax differentiation
+        jax maps vectorized functions explicitely, so the cost function
+        assumes a single vector x
+
+        Args:
+            x (np.array): the concatenated state control vector
+
+        Returns:
+            float: quadratic cost
+        """
+        u = x[..., -1:].reshape(1, -1)
+        x = x[..., :-1].reshape(1, -1)
+        x = to_polar(x.T).T
+        x = np.concatenate([x,u], -1)
+        return -(x @ self.QR.numpy() @ x.T)[0,0]
+
+    def cost_jax_(self, x):
+        """Replicates the cost function to enable jax differentiation
+        jax maps vectorized functions explicitely, so the cost function
+        assumes a single vector x
+
+        Args:
+            x (np.array): the concatenated state control vector
+
+        Returns:
+            float: quadratic cost
+        """
+        u = x[..., -1:]
+        x = x[..., :-1]
+        x = to_polar(x.T).T
+        return -np.diag(x @ self.Q.numpy() @ x.T + u @ self.R.numpy() @ u.T)
 
 
 class Cost2Prob():

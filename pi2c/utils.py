@@ -1,7 +1,8 @@
 from contextlib import contextmanager
 import datetime
 from distutils.spawn import find_executable
-import numpy as np
+import jax.numpy as np
+import torch
 import os
 from sys import argv
 import time
@@ -159,6 +160,31 @@ def configure_plots():
     if find_executable("latex"):
         matplotlib.rcParams['text.usetex'] = True
         matplotlib.rcParams['text.latex.unicode'] = True
+
+
+def to_polar(x):
+    x0 = np.arctan2(x[0, :], x[1, :])
+    x1 = x[2, :]
+    return np.stack([x0, x1], 0)
+
+
+def to_euclidean(x):
+    x0 = np.sin(x[0, :])
+    x1 = np.cos(x[0, :])
+    x2 = x[1, :]
+    return np.stack([x0, x1, x2], 0)
+
+
+def to_polar_torch(x):
+    x0 = torch.atan2(x[:, 0], x[:, 1])
+    x1 = x[:, 2]
+    return np.stack([x0, x1], 1)
+
+def to_euclidean_torch(x):
+    x0 = torch.sin(x[:, 0])
+    x1 = torch.cos(x[:, 0])
+    x2 = x[:, 1]
+    return torch.stack([x0, x1, x2], 1)
 
 
 # particle experiments argparser
