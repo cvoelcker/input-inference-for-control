@@ -138,8 +138,8 @@ class ParticlePlotter():
         return fig, ax
 
     def plot_all(self, alpha, f_particles, b_particles, weights, run_name, eval_env, cost, repeats=10, random_starts=True):
-        f_particles = self.clean(f_particles)
-        b_particles = np.flip(self.clean(b_particles), 0)
+        f_particles = self.graph.env.transform_for_plot(self.clean(f_particles))
+        b_particles = self.graph.env.transform_for_plot(np.flip(self.clean(b_particles), 0))
         weights = np.flip(self.clean(weights), 0)
 
         plt.clf()

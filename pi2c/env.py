@@ -125,6 +125,9 @@ class TorchLinearDisturbed(env_def.LinearDef, BaseSim):
             self.x += init_state_noise.sample().reshape(self.x.shape)
         return self.x
 
+    def transform_for_plot(self, x):
+        return x
+
     def forward(self, u):
         x = self.A @ self.x + self.B @ u + self.a
         x += self.normal.sample((x.shape[1],)).squeeze().view(x.shape)
@@ -151,6 +154,9 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
             self.key, sk = random.split(self.key)
             self.x += random.normal(sk, self.x.shape) * init_state_var
         return self.x
+
+    def transform_for_plot(self, x):
+        return x
 
     def forward(self, u):
         self.key, sk = random.split(self.key)
@@ -196,6 +202,9 @@ class PendulumKnown(env_def.PendulumKnown, BaseSim):
         self.x = self.to_euclidean(self.dynamics(_x, u) + disturbance)
         return self.x
 
+    def transform_for_plot(self, x):
+        return self.to_polar(x.T).T
+
     def log_likelihood(self, x0, u, x1):
         _x = self.dynamics(self.to_polar(x0), u)
         ll = jax_gmm.vec_log_normal_pdf(_x.T, self.sigV.dot(np.eye(2)), self.to_polar(x1).T)
@@ -233,6 +242,9 @@ class TorchPendulumKnown(env_def.PendulumKnown, BaseSim):
         disturbance = self.normal.sample((_x.shape[1],)).T
         self.x = env_autograd.pendulum_dynamics_torch(_x, u) + disturbance
         return self.to_euclidean(self.x)
+
+    def transform_for_plot(self, x):
+        return self.to_polar(x.T).T
 
     def log_likelihood(self, x0, u, x1):
         _x = env_autograd.pendulum_dynamics_torch(self.to_polar(x0), u) - self.to_polar(x1)
