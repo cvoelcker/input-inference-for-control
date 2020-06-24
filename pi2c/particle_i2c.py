@@ -412,7 +412,7 @@ class ParticleI2cGraph():
                 np_weights = np.concatenate(np.concatenate(np.flip(jax.nn.softmax(weights), 1), -1), 0)
                 alpha = self._score_matching_alpha_update(np_particles, np_weights)
                 converged = False
-                alpha, converged = self._quadratic_alpha_update(self.alpha)
+                # alpha, converged = self._quadratic_alpha_update(self.alpha)
             else:
                 converged = False
                 alpha = self.alpha
