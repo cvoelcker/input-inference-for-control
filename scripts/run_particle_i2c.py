@@ -17,10 +17,16 @@ from pi2c.particle_visualization import ParticlePlotter
 def build_quadratic_q(dim_x, dim_u, q=None, r=None):
     Q = np.eye(dim_x)
     R = np.eye(dim_u)
-    if Q is None: Q *= 10.
-    else: Q *= q
-    if R is None: R *= 1.
-    else: R *= r
+    if q is None: 
+        Q *= 10.
+    else:
+        q = np.array(q)
+        Q *= q
+    if r is None:
+        R *= 1.
+    else:
+        r = np.array(r)
+        R *= r
 
     # dynamic trajectory needs to be implemented here
     x = np.array([[0., 0.]])

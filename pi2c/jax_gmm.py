@@ -112,8 +112,8 @@ class GMM:
 
     def __init__(self, dim, n_components, idx, sig0=10000., key=0):
         self._pi = np.ones(n_components) / n_components
-        self._mu = random.normal(seed(), (n_components, dim)) * 3.
-        self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * sig0
+        self._mu = random.normal(seed(), (n_components, dim)) * 0.1
+        self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * np.array([[max(sig0, 10.), max(sig0, 10.), sig0]])
         self._sig = vmap(np.linalg.cholesky)(self._var)
 
         self.n_components = n_components
@@ -222,8 +222,9 @@ class GMM:
     def em_update(self, x, particle_weights, alpha=5e-2):
         assert not np.any(np.isnan(x))
         weight_func = lambda _x: vmap(log_normal_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
-        weights = vmap(weight_func)(x)
-        weights = np.exp((weights - special.logsumexp(weights,1).reshape(-1,1)))
+        log_weights = vmap(weight_func)(x).reshape(-1, self.n_components)
+        log_weights_norm = (log_weights - special.logsumexp(log_weights,1).reshape(-1,1))
+        weights = np.exp(log_weights_norm)
         mu = np.stack(
             [empirical_mu(x, (weights[:,i] * np.exp(particle_weights)).reshape(-1,1)) 
             for i in range(self.n_components)], 0)
@@ -234,11 +235,10 @@ class GMM:
                 and np.all(np.isclose(self._mu, mu)) \
                 and np.all(np.isclose(self._var, n_cov))
         weights *= np.exp(particle_weights).reshape(-1,1)
+        assert not np.any(np.isnan(mu)), f"{log_weights} {log_weights_norm} {self._mu} {x}"
         self._pi = self._smoothed_avg(self._pi, weights.sum(0)/weights.sum(), alpha)
         self._mu =  self._smoothed_avg(self._mu, mu, alpha)
         self._var = self._smoothed_avg(self._var, n_cov, alpha)
-        # print(self._var)
-        assert not np.any(np.isnan(self._mu))
         return converged
 
 if __name__ == "__main__":

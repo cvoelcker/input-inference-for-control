@@ -9,8 +9,10 @@ ENVIRONMENT:
     horizon: 100 # control horizon
     cost:
         shape: quadratic # currently, only quadratic cost functions are implemened
-        Q: 10.
-        R: 1.
+        Q:
+                - 10.
+        R:
+                - 1.
 
 POLICY:
     type: VSMC # choice: VSMC|mixture|KDE
