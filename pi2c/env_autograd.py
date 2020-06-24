@@ -11,10 +11,10 @@ def pendulum_dynamics(x, u):
     g = 9.80665
     u_mx = 2.
     u = np.clip(u, -u_mx, u_mx)
-    th_dot_dot = -3.0 * g / (2 * l) * np.sin(x[0] + np.pi) + d * x[1]
+    th_dot_dot = -3.0 * g / (2 * l) * np.sin(x[0,:] + np.pi) + d * x[1, :]
     th_dot_dot += 3.0 / (m * l**2) * u.squeeze()
-    x_dot = x[1] + th_dot_dot * dt
-    x_pos = x[0] + x_dot * dt
+    x_dot = x[1, :] + th_dot_dot * dt
+    x_pos = x[0, :] + x_dot * dt
     x2 = np.vstack((x_pos, x_dot)).reshape(x.shape)
     return x2
 

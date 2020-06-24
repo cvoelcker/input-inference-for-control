@@ -113,7 +113,9 @@ class GMM:
     def __init__(self, dim, n_components, idx, sig0=10000., key=0):
         self._pi = np.ones(n_components) / n_components
         self._mu = random.normal(seed(), (n_components, dim)) * 0.1
-        self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * np.array([[max(sig0, 10.), max(sig0, 10.), sig0]])
+        var_scale = [max(sig0, 10.)] * dim
+        var_scale[-1] = sig0
+        self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * np.array(var_scale)
         self._sig = vmap(np.linalg.cholesky)(self._var)
 
         self.n_components = n_components

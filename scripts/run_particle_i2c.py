@@ -21,6 +21,7 @@ def build_quadratic_q(dim_x, dim_u, q=None, r=None):
         Q *= 10.
     else:
         q = np.array(q)
+        print(q)
         Q *= q
     if r is None:
         R *= 1.
@@ -29,7 +30,7 @@ def build_quadratic_q(dim_x, dim_u, q=None, r=None):
         R *= r
 
     # dynamic trajectory needs to be implemented here
-    x = np.array([[0., 0.]])
+    x = np.zeros_like(q).reshape(1, -1)
     u = np.array([[0.]])
     cost = StaticQRCost(Q, R, x, u)
     prob = Cost2Prob(cost)
@@ -57,6 +58,8 @@ def build_particle_graph(config):
 
 def build_experiment(config):
     env = build_env(config.ENVIRONMENT.env_name, config.ENVIRONMENT.horizon)
+    print(env)
+    print(env.dim_x)
     cost, _ = build_quadratic_q(env.dim_x, env.dim_u, config.ENVIRONMENT.cost.Q, config.ENVIRONMENT.cost.R)
     graph = build_particle_graph(config)
     graph.set_env(env, cost)

@@ -2,7 +2,7 @@
 Environments to control
 """
 import matplotlib.pyplot as plt
-import numpy as np
+import jax.numpy as np
 from jax import random
 import scipy as sc
 import os
@@ -169,23 +169,36 @@ class PendulumKnown(env_def.PendulumKnown, BaseSim):
     def __init__(self, duration):
         self.duration = duration
         self.key = random.PRNGKey(0)
+        self.dim_x = 3
+
+    def to_polar(self, x):
+        x0 = np.arctan2(x[0, :], x[1, :])
+        x1 = x[2, :]
+        return np.vstack([x0, x1])
+
+    def to_euclidean(self, x):
+        x0 = np.sin(x[0, :])
+        x1 = np.cos(x[0, :])
+        x2 = x[1, :]
+        return np.vstack([x0, x1, x2])
 
     def init_env(self, init_state_var=1., randomized=True):
         self.key, sk = random.split(self.key)
-        self.x = self.x0.squeeze()
+        self.x = self.x0
         if randomized:
             self.x += self.sigV.dot(random.normal(sk, self.x.shape))
-        return self.x
+        return self.to_euclidean(self.x)
 
     def forward(self, u):
+        _x = self.to_polar(self.x)
         self.key, sk = random.split(self.key)
-        disturbance = self.sigV.dot(random.normal(sk, self.x.shape))
-        self.x = self.dynamics(self.x, u) + disturbance
+        disturbance = self.sigV.dot(random.normal(sk, _x.shape))
+        self.x = self.to_euclidean(self.dynamics(_x, u) + disturbance)
         return self.x
 
     def log_likelihood(self, x0, u, x1):
-        _x = self.dynamics(x0, u)
-        ll = jax_gmm.vec_log_normal_pdf(_x.T, self.sigV.dot(np.eye(self.dim_x)), x1.T)
+        _x = self.dynamics(self.to_polar(x0), u)
+        ll = jax_gmm.vec_log_normal_pdf(_x.T, self.sigV.dot(np.eye(2)), self.to_polar(x1).T)
         return ll
 
 
@@ -197,20 +210,32 @@ class TorchPendulumKnown(env_def.PendulumKnown, BaseSim):
         self.sigV = torch.tensor(self.sigV).float()
         self.normal = MultivariateNormal(torch.zeros(self.dim_x), self.sigV)
 
+    def to_polar(self, x):
+        x0 = torch.arctan2(x[:, 0]/x[:, 1])
+        x1 = x[:, 2]
+        return np.stack([x0, x1], 1)
+
+    def to_euclidean(self, x):
+        x0 = torch.sin(x[:, 0])
+        x1 = torch.cos(x[:, 0])
+        x2 = x[:, 1]
+        return torch.stack([x0, x1, x2], 1)
+
     def init_env(self, init_state_var=1., randomized=False):
         self.x = torch.tensor(np.copy(self.x0)).float()
         if randomized:
             dist = MultivariateNormal(self.x.T, torch.eye(self.dim_x) * init_state_var)
             return dist.sample().T
-        return self.x
+        return self.to_euclidean(self.x)
 
     def forward(self, u):
-        disturbance = self.normal.sample((self.x.shape[1],)).T
-        self.x = env_autograd.pendulum_dynamics_torch(self.x, u) + disturbance
-        return self.x
+        _x = self.to_polar(self.x)
+        disturbance = self.normal.sample((_x.shape[1],)).T
+        self.x = env_autograd.pendulum_dynamics_torch(_x, u) + disturbance
+        return self.to_euclidean(self.x)
 
     def log_likelihood(self, x0, u, x1):
-        _x = env_autograd.pendulum_dynamics_torch(x0, u) - x1
+        _x = env_autograd.pendulum_dynamics_torch(self.to_polar(x0), u) - self.to_polar(x1)
         return self.normal.log_prob(_x.T)
 
 

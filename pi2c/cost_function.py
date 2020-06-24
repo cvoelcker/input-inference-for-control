@@ -103,17 +103,6 @@ class StaticQRCost(QRCost):
         return -np.diag(x @ self.QR.numpy() @ x.T)
 
 
-class PendulumCost(StaticQRCost):
-
-    def _cost(self, x, u, xg, ug):
-        pass
-
-    def cost_jax(self, x):
-
-    def cost_jax_(self, x):
-
-
-
 class Cost2Prob():
     def __init__(self, cost, backend='torch'):
         self.normalized = cost.normalized

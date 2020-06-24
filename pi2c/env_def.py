@@ -92,7 +92,7 @@ class PendulumDef(BaseDef):
     unit = ["rad", "rad/s", "Nm"]
     x_whiten = [False, True, True]
     y_whiten = [True, True]
-    dim_x = 2
+    dim_x = 3 # TODO: Claas (changed, should mayeb redo code with dim_xa)
     dim_xa = 3  # augmented for 'observation'
     dim_u = 1
 
