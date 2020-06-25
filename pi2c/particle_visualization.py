@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from distutils.spawn import find_executable
 import matplotlib
+from matplotlib.lines import Line2D
 matplotlib.rcParams['font.family'] = 'serif'
 matplotlib.rcParams['figure.figsize'] = [19, 19]
 matplotlib.rcParams['legend.fontsize'] = 16
@@ -70,12 +71,14 @@ class ParticlePlotter():
         mean_f, sig_f, sig_upper_f, sig_lower_f = get_mean_sig_bounds(f_particles, 1, np.ones_like(b_weighing), 2)
         mean_b, sig_b, sig_upper_b, sig_lower_b = get_mean_sig_bounds(b_particles, 1, b_weighing, 2)
 
-        fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C0', alpha=.05)
-        fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C1', alpha=.1)
-        l1, = fig.plot(mean_f, color='C0')
-        l2, = fig.plot(mean_b, color='C1')
+        # fig.fill_between(np.arange(self.graph.T), sig_lower_f, sig_upper_f, color='C0', alpha=.05)
+        # fig.fill_between(np.arange(self.graph.T), sig_lower_b, sig_upper_b, color='C1', alpha=.1)
+        # l1, = fig.plot(mean_f, color='C0')
+        # l2, = fig.plot(mean_b, color='C1')
         fig.scatter(time_x_loc_f, f_particles.flatten(), 0.01, color='C0')
+        l1 = Line2D([0], [0], linestyle="none", marker="o", alpha=0.4, markersize=10, markerfacecolor='C0')
         fig.scatter(time_x_loc_b, b_particles.flatten(), b_weighing, color='C1')
+        l2 = Line2D([0], [0], linestyle="none", marker="o", alpha=0.4, markersize=10, markerfacecolor='C1')
 
         fig.set_xlabel('Timestep')
         fig.set_ylabel(dim_name + str(dim))

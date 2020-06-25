@@ -112,10 +112,10 @@ class GMM:
 
     def __init__(self, dim, n_components, idx, sig0=10000., key=0):
         self._pi = np.ones(n_components) / n_components
-        self._mu = random.normal(seed(), (n_components, dim)) * 0.1
+        self._mu = random.normal(seed(), (n_components, dim)) * 3.
         var_scale = [max(sig0, 10.)] * dim
         var_scale[-1] = sig0
-        self._var = np.eye(dim).reshape(1,dim,dim).repeat(n_components,0) * np.array(var_scale)
+        self._var = (np.eye(dim).reshape(1,dim,dim) * np.array(var_scale)).repeat(n_components,0)
         self._sig = vmap(np.linalg.cholesky)(self._var)
 
         self.n_components = n_components
@@ -178,6 +178,7 @@ class GMM:
         ran = random.normal(seed(), (n*reps, 1, self.dim-idx))
         ran = (ran @ sig[_idx_help, comp]).reshape(-1, mu.shape[-1])
         samples = offset + ran
+        assert not np.any(np.isnan(samples))
         return samples
 
     def conditional_mean(self, x, n):
@@ -224,12 +225,12 @@ class GMM:
     def em_update(self, x, particle_weights, alpha=5e-2):
         assert not np.any(np.isnan(x))
         weight_func = lambda _x: vmap(log_normal_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
-        log_weights = vmap(weight_func)(x).reshape(-1, self.n_components)
+        log_weights = vmap(weight_func)(x)
+        if np.any(np.isnan(log_weights)):
+            log_weights = np.maximum(log_weights, -1e10)
+        log_weights = log_weights.reshape(-1, self.n_components)
         log_weights_norm = (log_weights - special.logsumexp(log_weights,1).reshape(-1,1))
         weights = np.exp(log_weights_norm)
-        # TODO: hotfix for crashing assignment
-        if np.any(np.isnan(mu)):
-            return True
         mu = np.stack(
             [empirical_mu(x, (weights[:,i] * np.exp(particle_weights)).reshape(-1,1)) 
             for i in range(self.n_components)], 0)

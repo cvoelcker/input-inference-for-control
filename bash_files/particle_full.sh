@@ -1,7 +1,7 @@
 #### MIXTURE EVALUATIONS
 
 ## linear
-python scripts/run_particle_i2c.py --num-particles 100 --num-policy-samples 10 --batch-size 16 --horizon 100 --log-every 1 --em-steps 100 --env-name LinearDisturbed --type mixture --smoothing smoothing --init-alpha 0.00001 --components 1 --init-policy-variance 10000 --log-dir mixture_linear_s
+# python scripts/run_particle_i2c.py --num-particles 100 --num-policy-samples 10 --batch-size 16 --horizon 100 --log-every 1 --em-steps 100 --env-name LinearDisturbed --type mixture --smoothing smoothing --init-alpha 0.00001 --components 1 --init-policy-variance 10000 --log-dir mixture_linear_s
 python scripts/run_particle_i2c.py --num-particles 100 --num-policy-samples 10 --batch-size 16 --horizon 100 --log-every 1 --em-steps 100 --env-name LinearDisturbed --type mixture --smoothing smoothing --init-alpha 0.00001 --components 2 --init-policy-variance 10000 --log-dir mixture_bimodal_s --init-state-bimodal
 
 # linear large number particles
