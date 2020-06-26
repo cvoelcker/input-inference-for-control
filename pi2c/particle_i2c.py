@@ -108,8 +108,8 @@ class ParticleI2cCell(nn.Module):
                 self.dim_x, 
                 policy_config.u_clipping,
                 policy_config.init_policy_variance,
-                policy_config.lambda)
-            self.exp_factor = policy_config.lambda
+                policy_config.exp_factor)
+            self.exp_factor = policy_config.exp_factor
         elif strategy == 'KDE':
             # TODO: setup KDE policy/joint
             raise NotImplementedError('[WIP] Implement')
@@ -146,7 +146,7 @@ class ParticleI2cCell(nn.Module):
         elif self.strategy == 'mixture':
             u_weights = np.log(self.exp_factor) + ((-self.exp_factor**2 + 1)/(2 * self.exp_factor**2)) * ((new_u - mu)/sig).reshape(-1,1)
             particles = np.repeat(particles, self.u_samples, 0)
-            samples, log_weights = self.obs_lik.log_sample_jax(particles, new_u, self.num_p, alpha, u_weights)
+            samples, log_weights = self.obs_lik.log_sample_jax(particles, new_u, self.num_p, u_weights, alpha)
         self.samples = samples//self.u_samples
         self.log_weights = log_weights[samples].squeeze()
         if self.strategy == 'VSMC':

@@ -182,7 +182,7 @@ class GMM:
         samples = offset + ran
         samples = np.clip(samples, -self.u_clipping, self.u_clipping)
         assert not np.any(np.isnan(samples))
-        return samples, offset, sig[_idx_help, comp]
+        return samples, offset.reshape(-1,1), sig[_idx_help, comp].reshape(-1,1)
 
     def conditional_mean(self, x, n):
         x = x.reshape(-1, self.idx)
