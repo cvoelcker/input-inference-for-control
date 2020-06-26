@@ -283,7 +283,7 @@ class ParticleI2cGraph():
             self.cost.torch = False
         self.policy_ready = True
 
-    def set_optimizer(self, strategy, batch_size, norm=None, lr=None, optimizer=None):
+    def set_optimizer(self, strategy, batch_size, clip_alpha, norm=None, lr=None, optimizer=None):
         assert self.policy_ready, 'Tried to set optimization before policy'
         self.optimizer_type = strategy
         if strategy == 'gradient':
@@ -297,6 +297,7 @@ class ParticleI2cGraph():
         if strategy == 'em':
             self.alpha_update = 'quadratic'
             self.sigXi0 = np.linalg.inv(self.cost.QR.numpy())
+        self.clip_alpha = clip_alpha
         self.batch_size = batch_size
         self.optimizer_ready = True
 
@@ -327,7 +328,10 @@ class ParticleI2cGraph():
             forward_particles, weights, backward_particles = self._expectation(_iter, run_bimodal_exp)
             alpha, loss, converged = self._maximization(weights, backward_particles, update_alpha=update_alpha)
             if update_alpha:
-                self.alpha = alpha
+                if self.clip_alpha:
+                    self.alpha = np.clip(alpha, self.alpha * 0.75, self.alpha * 1.5)
+                else:
+                    self.alpha = alpha
             if self.policy_type == 'VSMC':
                 losses.append(loss.detach().numpy())
         self.log_id += 1

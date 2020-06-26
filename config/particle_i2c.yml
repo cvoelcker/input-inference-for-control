@@ -35,6 +35,7 @@ OPTIMIZER:
     lr: 0.001
     gradient_norm: 100
     batch_size: 1 # independent forward/backward passes (larger number needed for mixture policies)
+    clip_alpha: False
             
 LOGGING:
     em_steps: 250000 # total number of EM steps (for LQ choose 250000 for VSMC, 500 for mixture models)

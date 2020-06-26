@@ -2,6 +2,7 @@ from contextlib import contextmanager
 import datetime
 from distutils.spawn import find_executable
 import jax.numpy as np
+from jax import jit
 import torch
 import os
 from sys import argv
@@ -162,12 +163,14 @@ def configure_plots():
         matplotlib.rcParams['text.latex.unicode'] = True
 
 
+@jit
 def to_polar(x):
     x0 = np.arctan2(x[0, :], x[1, :])
     x1 = x[2, :]
     return np.stack([x0, x1], 0)
 
 
+@jit
 def to_euclidean(x):
     x0 = np.sin(x[0, :])
     x1 = np.cos(x[0, :])
@@ -179,6 +182,7 @@ def to_polar_torch(x):
     x0 = torch.atan2(x[:, 0], x[:, 1])
     x1 = x[:, 2]
     return np.stack([x0, x1], 1)
+
 
 def to_euclidean_torch(x):
     x0 = torch.sin(x[:, 0])

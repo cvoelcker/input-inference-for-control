@@ -71,10 +71,10 @@ def build_experiment(config):
     graph.set_policy(config.POLICY.type, config.POLICY.smoothing, config.POLICY)
     if config.POLICY.type == 'VSMC':
         pi2c.particle_i2c.BACKEND = 'torch'
-        graph.set_optimizer('gradient', config.OPTIMIZER.batch_size, config.OPTIMIZER.gradient_norm, config.OPTIMIZER.lr)
+        graph.set_optimizer('gradient', config.OPTIMIZER.batch_size, config.OPTIMIZER.clip_alpha, config.OPTIMIZER.gradient_norm, config.OPTIMIZER.lr)
     elif config.POLICY.type == 'mixture':
         pi2c.particle_i2c.BACKEND = 'jax'
-        graph.set_optimizer('em', config.OPTIMIZER.batch_size)
+        graph.set_optimizer('em', config.OPTIMIZER.batch_size, config.OPTIMIZER.clip_alpha)
     return graph, env, cost
 
 
