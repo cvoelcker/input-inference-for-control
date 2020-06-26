@@ -7,3 +7,4 @@
 
 logging/*
 .vscode
+pi2c.egg-info/*
