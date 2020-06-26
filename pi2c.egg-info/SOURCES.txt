@@ -1,7 +1,0 @@
-README.md
-setup.py
-pi2c.egg-info/PKG-INFO
-pi2c.egg-info/SOURCES.txt
-pi2c.egg-info/dependency_links.txt
-pi2c.egg-info/requires.txt
-pi2c.egg-info/top_level.txt
