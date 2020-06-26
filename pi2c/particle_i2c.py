@@ -144,7 +144,7 @@ class ParticleI2cCell(nn.Module):
             samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p, alpha)
             samples.detach()
         elif self.strategy == 'mixture':
-            u_weights = np.log(self.exp_factor) + ((-self.exp_factor**2 + 1)/(2 * self.exp_factor**2)) * ((new_u - mu)/sig).reshape(-1,1)
+            u_weights = np.log(self.exp_factor) + np.exp(((-self.exp_factor**2 + 1)/(2 * self.exp_factor**2)) * ((new_u - mu)/sig)).reshape(-1,1)
             particles = np.repeat(particles, self.u_samples, 0)
             samples, log_weights = self.obs_lik.log_sample_jax(particles, new_u, self.num_p, u_weights, alpha)
         self.samples = samples//self.u_samples
