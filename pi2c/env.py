@@ -166,8 +166,8 @@ class LinearDisturbed(env_def.LinearDef, BaseSim):
         return x + r
 
     def log_likelihood(self, x0, u, x1):
-        _x = self.A @ x0 + self.B @ u + self.a
-        ll = jax_gmm.vec_log_normal_pdf(_x.T, np.eye(self.dim_x) * self.sig_x_noise, x1.T)
+        _x = self.A @ x0 + self.B @ u + self.a - x1
+        ll = jax_gmm.vec_log_normal_pdf(np.zeros_like(self.x).T, np.eye(self.dim_x) * self.sig_x_noise, _x.T)
         return ll
 
 
@@ -201,7 +201,8 @@ class PendulumKnown(env_def.PendulumKnown, BaseSim):
 
     def log_likelihood(self, x0, u, x1):
         _x = self.dynamics(to_polar(x0), u)
-        ll = jax_gmm.vec_log_normal_pdf(_x.T, self.sigV.dot(np.eye(2)), to_polar(x1).T)
+        _x -= to_polar(x1)
+        ll = jax_gmm.vec_log_normal_pdf(np.zeros_like(self.x).T, self.sigV.dot(np.eye(2)), _x.T)
         return ll
 
 

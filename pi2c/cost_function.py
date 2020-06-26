@@ -166,11 +166,11 @@ class Cost2Prob():
     def likelihood(self, x, u, alpha=1., xg=None, ug=None):
         return np.exp(alpha * self.c.cost(x, u, xg, ug))
 
-    def log_sample(self, x, u, n, alpha=1., xg=None, ug=None):
+    def log_sample(self, x, weight, u, n, alpha=1., xg=None, ug=None):
         c = self.c.cost(x, u, xg, ug)
         costs = c.reshape(-1,1) # unnormalized log probabilities
         samples = Gumbel(loc=0., scale=1.).sample((x.shape[0],n))
-        log_gumbel = alpha * costs + samples
+        log_gumbel = alpha * costs + weight + samples
         _, choices = torch.max(log_gumbel, 0)
         return choices, alpha*costs
 

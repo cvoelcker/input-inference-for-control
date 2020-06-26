@@ -58,7 +58,7 @@ def set_numerical_backend(backend):
         raise NotImplementedError('Backend {} unkown'.format(backend))
 
 logsumexp_dict = {'torch': lambda x: torch.logsumexp(x, 0),
-        'jax': jax.scipy.special.logsumexp,
+        'jax': lambda x: jax.scipy.special.logsumexp(x, 0),
         'numpy': scipy.special.logsumexp}
 def logsumexp(x):
     return logsumexp_dict[BACKEND](x)
@@ -135,10 +135,12 @@ class ParticleI2cCell(nn.Module):
 
     def forward_pass(self, particles, iteration, failed=False, alpha=1.):
         new_u = []
-        new_u = self.policy(particles, self.u_samples)
+        new_u, mu, var = self.policy(particles, self.u_samples)
+
         if self.strategy == 'VSMC':
+            proposal_weight = np.log(2) - ((3./8.) * ((mu - mu) / var.reshape(-1, 1)) ** 2)
             particles = torch.repeat_interleave(particles, self.u_samples, 0)
-            samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p, alpha)
+            samples, log_weights = self.obs_lik.log_sample(particles, weight, new_u, self.num_p, alpha)
             samples.detach()
         elif self.strategy == 'mixture':
             particles = np.repeat(particles, self.u_samples, 0)
@@ -164,24 +166,22 @@ class ParticleI2cCell(nn.Module):
         """
         if self.strategy == 'VSMC':
             smoothed_weights = []
-            for p in self.particles:
+            for p in samples:
                 p = p.reshape(1,-1)
-                forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T)
-                forward_ll_w = forward_ll + weights
-                forward_ll_norm = logsumexp(forward_ll + self.log_weights)
-                forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
+                forward_ll = self.env.log_likelihood(self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p.T).reshape(-1)
+                forward_ll_norm = logsumexp(self.log_weights + forward_ll)
+                forward_ll_w_normalized = forward_ll - forward_ll_norm
                 smoothed_weights.append(forward_ll_w_normalized)
             smoothed_weights = torch.tensor(smoothed_weights)
         elif self.strategy == 'mixture':
             def smoothing_loop(p):
                 p = p.reshape(1,-1)
-                forward_ll = self.env.log_likelihood(p[:, :self.dim_x].T, p[:, self.dim_x:].T, samples[:, :self.dim_x].T).reshape(-1)
-                # forward_ll += np.log(self.policy.conditional_likelihood(samples[:, :self.dim_x], samples[:, self.dim_x:]))
-                forward_ll_w = forward_ll + weights
-                forward_ll_norm = logsumexp(forward_ll + self.log_weights)
-                forward_ll_w_normalized = logsumexp(forward_ll_w - forward_ll_norm)
-                return forward_ll_w_normalized
-            smoothed_weights = jax.vmap(smoothing_loop)(self.particles)
+                forward_ll = self.env.log_likelihood(self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p.T).reshape(-1)
+                forward_ll_norm = logsumexp(self.log_weights + forward_ll)
+                return forward_ll - forward_ll_norm
+            lls = jax.vmap(smoothing_loop)(samples)
+            lls += weights.reshape(-1,1)
+            smoothed_weights = logsumexp(lls.T)
         self.log_weights += smoothed_weights
         return self.particles, self.samples, self.log_weights
 
@@ -329,7 +329,7 @@ class ParticleI2cGraph():
             alpha, loss, converged = self._maximization(weights, backward_particles, update_alpha=update_alpha)
             if update_alpha:
                 if self.clip_alpha:
-                    self.alpha = np.clip(alpha, self.alpha * 0.75, self.alpha * 1.5)
+                    self.alpha = np.clip(alpha, self.alpha * 0.91, self.alpha * 1.1)
                 else:
                     self.alpha = alpha
             if self.policy_type == 'VSMC':
