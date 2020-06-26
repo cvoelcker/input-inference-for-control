@@ -1,4 +1,5 @@
 from tqdm import tqdm
+import time
 
 import jax.numpy as np
 from jax.scipy import special
@@ -223,9 +224,8 @@ class GMM:
             if iters == max_iters:
                 break
             iters += 1
-        # print(f'\t cycle {iters}')
 
-    def em_update(self, x, particle_weights, alpha=5e-2):
+    def em_update(self, x, particle_weights, alpha=5e-2, tol=1e-4):
         assert not np.any(np.isnan(x))
         weight_func = lambda _x: vmap(log_normal_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
         log_weights = vmap(weight_func)(x)
@@ -242,11 +242,12 @@ class GMM:
         n_cov = np.stack(
             [empirical_cov(x, mu[i].reshape(1,-1), weights[:,i] * np.exp(particle_weights).reshape(-1)) 
             for i in range(self.n_components)], 0)
-        converged = np.all(np.isclose(self._pi, weights.sum(0)/weights.sum())) \
-                and np.all(np.isclose(self._mu, mu)) \
-                and np.all(np.isclose(self._var, n_cov))
-        assert not np.any(np.isnan(mu)), f"{self._pi} {mu}"
         weights *= np.exp(particle_weights).reshape(-1,1)
+        pi = weights.sum(0)/weights.sum()
+        converged = np.all(np.isclose(self._pi, pi, atol=tol)) \
+                and np.all(np.isclose(self._mu, mu, atol=tol)) \
+                and np.all(np.isclose(self._var, n_cov, atol=tol))
+        assert not np.any(np.isnan(mu)), f"{self._pi} {mu}"
         self._pi = self._smoothed_avg(self._pi, weights.sum(0)/weights.sum(), alpha)
         self._mu =  self._smoothed_avg(self._mu, mu, alpha)
         self._var = self._smoothed_avg(self._var, n_cov, alpha)

@@ -183,7 +183,7 @@ class ParticleI2cCell(nn.Module):
                 return forward_ll - forward_ll_norm
             lls = jax.vmap(smoothing_loop)(samples)
             lls += weights.reshape(-1,1)
-            smoothed_weights = logsumexp(lls.T)
+            smoothed_weights = logsumexp(lls)
         self.log_weights += smoothed_weights
         return self.particles, self.samples, self.log_weights
 
@@ -209,16 +209,19 @@ class ParticleI2cCell(nn.Module):
     def update_policy(self, particles, weights):
         """
         """
-        resampled_particles = []
         # resampled_particles = np.concatenate(particles)
-        weights = np.concatenate(weights)
-        for p, w in zip(particles, weights):
-            self.key, sk = random.split(self.key)
-            samples = random.gumbel(sk, (len(p), len(p)))
-            choices = np.argmax(samples + w.reshape(-1,1), 0)
-            resampled_particles.append(np.take(p, choices, 0))
-        resampled_particles = np.concatenate(resampled_particles, 0)
-        self.policy.update_parameters(resampled_particles, np.zeros_like(weights))
+        norm_log_weights = np.concatenate(weights) - np.max(weights)
+        norm_weights = jax.nn.softmax(np.concatenate(weights))
+        # resampled_particles = []
+        # weights = np.concatenate(weights)
+        # for p, w in zip(particles, weights):
+        #     self.key, sk = random.split(self.key)
+        #     samples = random.gumbel(sk, (len(p), len(p)))
+        #     choices = np.argmax(samples + w.reshape(-1,1), 0)
+        #     resampled_particles.append(np.take(p, choices, 0))
+        # resampled_particles = np.concatenate(resampled_particles, 0)
+        # self.policy.update_parameters(resampled_particles, np.zeros_like(weights))
+        self.policy.update_parameters(np.concatenate(particles), norm_log_weights)
 
     def current_backward_costs(self):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
@@ -419,7 +422,7 @@ class ParticleI2cGraph():
                 c.update_policy(particles[:, i], weights[:, i])
             if update_alpha:
                 np_particles = np.concatenate(np.concatenate(particles, -2), 0)
-                np_weights = np.concatenate(np.concatenate(np.flip(jax.nn.softmax(weights), 1), -1), 0)
+                np_weights = jax.nn.softmax(np.concatenate(weights, 1))
                 alpha = self._score_matching_alpha_update(np_particles, np_weights)
                 converged = False
                 # alpha, converged = self._quadratic_alpha_update(self.alpha)

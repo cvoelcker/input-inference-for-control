@@ -61,7 +61,7 @@ class ParticlePlotter():
         b_particles = b_particles[..., dim]
 
         b_weighing = weights
-        b_weighing *= (1/np.max(b_weighing, 1, keepdims=True))
+        b_weighing *= (2/np.max(b_weighing, 1, keepdims=True))
 
         time_x_loc_f = np.repeat(np.arange(self.graph.T), f_particles.shape[1])
         time_x_loc_b = np.repeat(np.arange(self.graph.T), b_particles.shape[1])
@@ -146,7 +146,7 @@ class ParticlePlotter():
     def plot_all(self, alpha, f_particles, b_particles, weights, run_name, eval_env, cost, repeats=10, random_starts=True):
         f_particles = self.graph.env.transform_for_plot(self.clean(f_particles))
         b_particles = self.graph.env.transform_for_plot(np.flip(self.clean(b_particles), 0))
-        weights = np.flip(self.clean(weights), 0)
+        weights = np.flip(self.clean(weights, True), 0)
 
         plt.clf()
         fig, axs = plt.subplots(3)
