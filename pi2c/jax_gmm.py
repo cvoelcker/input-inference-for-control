@@ -164,7 +164,7 @@ class GMM:
         reps = x.shape[0]
         _idx_help = np.arange(n*reps)
         pi, mu, var = self.condition(x, idx)
-        var = np.maximum(var, 1e-5) * 2. # TODO: test exploration factor
+        var = np.maximum(var, 1e-5) #* 2. # TODO: test exploration factor
         sig = vmap(np.linalg.cholesky)(var)
 
         pi = np.repeat(pi, n, 0)

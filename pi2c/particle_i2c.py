@@ -138,9 +138,8 @@ class ParticleI2cCell(nn.Module):
         new_u, mu, var = self.policy(particles, self.u_samples)
 
         if self.strategy == 'VSMC':
-            proposal_weight = np.log(2) - ((3./8.) * ((mu - mu) / var.reshape(-1, 1)) ** 2)
             particles = torch.repeat_interleave(particles, self.u_samples, 0)
-            samples, log_weights = self.obs_lik.log_sample(particles, weight, new_u, self.num_p, alpha)
+            samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p, alpha)
             samples.detach()
         elif self.strategy == 'mixture':
             particles = np.repeat(particles, self.u_samples, 0)
@@ -176,7 +175,7 @@ class ParticleI2cCell(nn.Module):
         elif self.strategy == 'mixture':
             def smoothing_loop(p):
                 p = p.reshape(1,-1)
-                forward_ll = self.env.log_likelihood(self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p.T).reshape(-1)
+                forward_ll = self.env.log_likelihood(self.particles[:, :self.dim_x].T, self.particles[:, self.dim_x:].T, p[:, :self.dim_x].T).reshape(-1)
                 forward_ll_norm = logsumexp(self.log_weights + forward_ll)
                 return forward_ll - forward_ll_norm
             lls = jax.vmap(smoothing_loop)(samples)
@@ -336,6 +335,7 @@ class ParticleI2cGraph():
                 losses.append(loss.detach().numpy())
         self.log_id += 1
         print()
+        print(alpha)
         print(self.alpha)
         return self.alpha, loss, forward_particles, weights, backward_particles
 
