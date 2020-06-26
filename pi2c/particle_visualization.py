@@ -83,7 +83,7 @@ class ParticlePlotter():
         fig.set_xlabel('Timestep')
         fig.set_ylabel(dim_name + str(dim))
         fig.set_title('Forward/backward particles over ' + dim_name + str(dim))
-        fig.legend([l1, l2], ['Forward particles', 'Backward particles'], location='upper left')
+        fig.legend([l1, l2], ['Forward particles', 'Backward particles'], loc='upper left')
         
         return fig
 
