@@ -106,6 +106,7 @@ class ParticleI2cCell(nn.Module):
                 self.dim_x + self.dim_u, 
                 policy_config.components, 
                 self.dim_x, 
+                policy_config.u_clipping,
                 policy_config.init_policy_variance)
         elif strategy == 'KDE':
             # TODO: setup KDE policy/joint
@@ -321,8 +322,8 @@ class ParticleI2cGraph():
         _iter = 0
         losses = []
         # alpha is updated only in the last timestep to prevent superfluous changes before policy convergence
-        update_alpha = (_iter == (max_iter-1))
         for _iter in tqdm(range(max_iter)):
+            update_alpha = (_iter == (max_iter-1))
             forward_particles, weights, backward_particles = self._expectation(_iter, run_bimodal_exp)
             alpha, loss, converged = self._maximization(weights, backward_particles, update_alpha=update_alpha)
             if update_alpha:

@@ -110,13 +110,14 @@ def empirical_mu(x, weights=None):
 
 class GMM:
 
-    def __init__(self, dim, n_components, idx, sig0=10000., key=0):
+    def __init__(self, dim, n_components, idx, u_clipping=1e10, sig0=10000., key=0):
         self._pi = np.ones(n_components) / n_components
         self._mu = random.normal(seed(), (n_components, dim)) * 3.
         var_scale = [max(sig0, 10.)] * dim
         var_scale[-1] = sig0
         self._var = (np.eye(dim).reshape(1,dim,dim) * np.array(var_scale)).repeat(n_components,0)
         self._sig = vmap(np.linalg.cholesky)(self._var)
+        self.u_clipping = u_clipping
 
         self.n_components = n_components
         self.dim = dim
@@ -178,6 +179,7 @@ class GMM:
         ran = random.normal(seed(), (n*reps, 1, self.dim-idx))
         ran = (ran @ sig[_idx_help, comp]).reshape(-1, mu.shape[-1])
         samples = offset + ran
+        samples = np.clip(samples, -self.u_clipping, self.u_clipping)
         assert not np.any(np.isnan(samples))
         return samples
 
@@ -211,7 +213,7 @@ class GMM:
     def _smoothed_avg(self, x0, x1, alpha):
         return (1-alpha) * x0 + alpha * x1
 
-    def update_parameters(self, x, weights, alpha=1., max_iters=3):
+    def update_parameters(self, x, weights, alpha=1., max_iters=1000):
         assert not np.any(np.isnan(x))
         converged = False
         iters = 0
@@ -219,18 +221,20 @@ class GMM:
             converged = self.em_update(x, weights, alpha)
             if iters == max_iters:
                 break
-            if iters >= 0:
-                iters += 1
+            iters += 1
+        # print(f'\t cycle {iters}')
 
     def em_update(self, x, particle_weights, alpha=5e-2):
         assert not np.any(np.isnan(x))
         weight_func = lambda _x: vmap(log_normal_pdf, in_axes=(0,0,None), out_axes=0)(self._mu, self._var, _x)
         log_weights = vmap(weight_func)(x)
-        if np.any(np.isnan(log_weights)):
-            log_weights = np.maximum(log_weights, -1e10)
+        if not np.all(np.isfinite(log_weights)):
+            log_weights = numpy.nan_to_num(log_weights, nan=-1e10)
         log_weights = log_weights.reshape(-1, self.n_components)
         log_weights_norm = (log_weights - special.logsumexp(log_weights,1).reshape(-1,1))
         weights = np.exp(log_weights_norm)
+        weights += 1e-5
+        assert not np.any(np.isnan(weights)), log_weights
         mu = np.stack(
             [empirical_mu(x, (weights[:,i] * np.exp(particle_weights)).reshape(-1,1)) 
             for i in range(self.n_components)], 0)
@@ -240,6 +244,7 @@ class GMM:
         converged = np.all(np.isclose(self._pi, weights.sum(0)/weights.sum())) \
                 and np.all(np.isclose(self._mu, mu)) \
                 and np.all(np.isclose(self._var, n_cov))
+        assert not np.any(np.isnan(mu)), f"{self._pi} {mu}"
         weights *= np.exp(particle_weights).reshape(-1,1)
         self._pi = self._smoothed_avg(self._pi, weights.sum(0)/weights.sum(), alpha)
         self._mu =  self._smoothed_avg(self._mu, mu, alpha)

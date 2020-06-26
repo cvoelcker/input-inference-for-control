@@ -11,7 +11,7 @@ ENVIRONMENT:
         shape: quadratic # currently, only quadratic cost functions are implemened
         Q:
                 - 10.
-                - 1.
+                - 10.
         R:
                 - 1.
 
@@ -22,6 +22,7 @@ POLICY:
     init_policy_variance: 1. # initial variance of p(u|x)
     init_policy_mean: 0. # initial mean of p(u|x)
     components: 2 # number of components for mixture policies
+    u_clipping: 100000000000. # clipping for u values, off by default
 
 GRAPH:
     num_particles: 100 # number of particles passed at each timestep
