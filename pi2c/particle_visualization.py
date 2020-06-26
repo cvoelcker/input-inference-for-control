@@ -29,11 +29,14 @@ class ParticlePlotter():
         self.init_state_var = config.ENVIRONMENT.init_state_var
         self.i = 0
 
-    def clean(self, arr):
+    def clean(self, arr, norm=False):
         if self.policy_type == 'VSMC':
             # don't ask
             arr = [[a.detach().numpy() for a in ar] for ar in arr]
-        arr = np.concatenate(np.stack([np.stack(a) for a in arr]), 1)
+        a = [np.stack(a) for a in arr]
+        if norm:
+            a = [jax.nn.softmax(a) for a in a]
+        arr = np.concatenate(np.stack(a), 1)
         return arr
 
     def build_plot(self, title_pre, fig_name=None):
@@ -57,7 +60,7 @@ class ParticlePlotter():
         f_particles = f_particles[..., dim]
         b_particles = b_particles[..., dim]
 
-        b_weighing = jax.nn.softmax(weights)
+        b_weighing = weights
         b_weighing *= (1/np.max(b_weighing, 1, keepdims=True))
 
         time_x_loc_f = np.repeat(np.arange(self.graph.T), f_particles.shape[1])
