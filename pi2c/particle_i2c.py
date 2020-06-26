@@ -107,7 +107,9 @@ class ParticleI2cCell(nn.Module):
                 policy_config.components, 
                 self.dim_x, 
                 policy_config.u_clipping,
-                policy_config.init_policy_variance)
+                policy_config.init_policy_variance,
+                policy_config.lambda)
+            self.exp_factor = policy_config.lambda
         elif strategy == 'KDE':
             # TODO: setup KDE policy/joint
             raise NotImplementedError('[WIP] Implement')
@@ -135,15 +137,16 @@ class ParticleI2cCell(nn.Module):
 
     def forward_pass(self, particles, iteration, failed=False, alpha=1.):
         new_u = []
-        new_u, mu, var = self.policy(particles, self.u_samples)
+        new_u, mu, sig = self.policy(particles, self.u_samples)
 
         if self.strategy == 'VSMC':
             particles = torch.repeat_interleave(particles, self.u_samples, 0)
             samples, log_weights = self.obs_lik.log_sample(particles, new_u, self.num_p, alpha)
             samples.detach()
         elif self.strategy == 'mixture':
+            u_weights = np.log(self.exp_factor) + ((-self.exp_factor**2 + 1)/(2 * self.exp_factor**2)) * ((new_u - mu)/sig).reshape(-1,1)
             particles = np.repeat(particles, self.u_samples, 0)
-            samples, log_weights = self.obs_lik.log_sample_jax(particles, new_u, self.num_p, alpha)
+            samples, log_weights = self.obs_lik.log_sample_jax(particles, new_u, self.num_p, alpha, u_weights)
         self.samples = samples//self.u_samples
         self.log_weights = log_weights[samples].squeeze()
         if self.strategy == 'VSMC':

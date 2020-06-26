@@ -177,10 +177,10 @@ class Cost2Prob():
     def cost_jax(self, x):
         return self.c.cost_jax_(x)
 
-    def log_sample_jax(self, x, u, n, alpha=1, xg=None, ug=None):
+    def log_sample_jax(self, x, u, n, alpha=1, weights, xg=None, ug=None):
         x = np.concatenate((x,u), 1)
         c = vmap(self.c.cost_jax)(x)
-        costs = c.reshape(-1,1)
+        costs = c.reshape(-1,1) + weights
         samples = gumbel(self.key, (costs.shape[0], n))
         choices = np.argmax(samples + alpha * costs, 0)
         return choices, alpha * costs

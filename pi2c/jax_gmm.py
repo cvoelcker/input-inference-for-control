@@ -110,7 +110,7 @@ def empirical_mu(x, weights=None):
 
 class GMM:
 
-    def __init__(self, dim, n_components, idx, u_clipping=1e10, sig0=10000., key=0):
+    def __init__(self, dim, n_components, idx, u_clipping=1e10, sig0=10000., key=0, exp_factor=2):
         self._pi = np.ones(n_components) / n_components
         self._mu = random.normal(seed(), (n_components, dim)) * 3.
         var_scale = [max(sig0, 10.)] * dim
@@ -122,6 +122,7 @@ class GMM:
         self.n_components = n_components
         self.dim = dim
         self.idx = idx
+        self.exp_factor = exp_factor
 
     @property
     def params(self):
@@ -164,7 +165,7 @@ class GMM:
         reps = x.shape[0]
         _idx_help = np.arange(n*reps)
         pi, mu, var = self.condition(x, idx)
-        var = np.maximum(var, 1e-5) #* 2. # TODO: test exploration factor
+        var = np.maximum(var, 1e-5)
         sig = vmap(np.linalg.cholesky)(var)
 
         pi = np.repeat(pi, n, 0)
@@ -176,7 +177,7 @@ class GMM:
                 np.log(pi),
                 axis=1).reshape(-1)
         offset = mu[_idx_help, comp]
-        ran = random.normal(seed(), (n*reps, 1, self.dim-idx))
+        ran = random.normal(seed(), (n*reps, 1, self.dim-idx)) * self.exp_factor
         ran = (ran @ sig[_idx_help, comp]).reshape(-1, mu.shape[-1])
         samples = offset + ran
         samples = np.clip(samples, -self.u_clipping, self.u_clipping)
