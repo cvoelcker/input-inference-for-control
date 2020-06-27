@@ -145,6 +145,24 @@ class GMM:
     def log_likelihood(self, x):
         return np.log(self.likelihood(x))
 
+    def cluster_sample(self, x, n):
+        reps = x.shape[0]
+        _idx_help = np.arange(n*reps)
+        pi, _, _ = self.condition(x, self.idx)
+        pi = np.repeat(pi, n, 0)
+        comp = random.categorical(
+                seed(),
+                np.log(pi),
+                axis=1).reshape(-1)
+        offset = np.repeat(self._mu[np.newaxis, :, self.idx:], n*reps, 0)[_idx_help, comp]
+        sig = np.repeat(self._sig[np.newaxis, :, self.idx:, self.idx:], n*reps, 0)[_idx_help, comp]
+        ran = random.normal(seed(), (n*reps, 1, self.dim-self.idx)) * self.exp_factor
+        ran = (ran @ sig).reshape(-1, offset.shape[-1])
+        samples = offset + ran
+        samples = np.clip(samples, -self.u_clipping, self.u_clipping)
+        assert not np.any(np.isnan(samples))
+        return samples, offset.reshape(-1,1), sig.reshape(-1,1)
+
     def sample(self, n):
         comp = random.categorical(
                 seed(),
@@ -215,7 +233,7 @@ class GMM:
     def _smoothed_avg(self, x0, x1, alpha):
         return (1-alpha) * x0 + alpha * x1
 
-    def update_parameters(self, x, weights, alpha=1., max_iters=1000):
+    def update_parameters(self, x, weights, alpha=1., max_iters=50):
         assert not np.any(np.isnan(x))
         converged = False
         iters = 0

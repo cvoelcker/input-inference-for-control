@@ -137,7 +137,7 @@ class ParticleI2cCell(nn.Module):
 
     def forward_pass(self, particles, iteration, failed=False, alpha=1.):
         new_u = []
-        new_u, mu, sig = self.policy(particles, self.u_samples)
+        new_u, mu, sig = self.policy.cluster_sample(particles, self.u_samples)
 
         if self.strategy == 'VSMC':
             particles = torch.repeat_interleave(particles, self.u_samples, 0)
@@ -210,18 +210,18 @@ class ParticleI2cCell(nn.Module):
         """
         """
         # resampled_particles = np.concatenate(particles)
-        norm_log_weights = np.concatenate(weights) - np.max(weights)
-        norm_weights = jax.nn.softmax(np.concatenate(weights))
-        # resampled_particles = []
+        # norm_log_weights = np.concatenate(weights) - np.max(weights)
+        # norm_weights = jax.nn.softmax(np.concatenate(weights))
+        resampled_particles = []
         # weights = np.concatenate(weights)
-        # for p, w in zip(particles, weights):
-        #     self.key, sk = random.split(self.key)
-        #     samples = random.gumbel(sk, (len(p), len(p)))
-        #     choices = np.argmax(samples + w.reshape(-1,1), 0)
-        #     resampled_particles.append(np.take(p, choices, 0))
-        # resampled_particles = np.concatenate(resampled_particles, 0)
-        # self.policy.update_parameters(resampled_particles, np.zeros_like(weights))
-        self.policy.update_parameters(np.concatenate(particles), norm_log_weights)
+        for p, w in zip(particles, weights):
+            self.key, sk = random.split(self.key)
+            samples = random.gumbel(sk, (len(p), len(p)))
+            choices = np.argmax(samples + w.reshape(-1,1), 0)
+            resampled_particles.append(np.take(p, choices, 0))
+        resampled_particles = np.concatenate(resampled_particles, 0)
+        self.policy.update_parameters(resampled_particles, np.zeros_like(weights))
+        # self.policy.update_parameters(np.concatenate(particles), norm_log_weights)
 
     def current_backward_costs(self):
         c = self.cost(self.back_particles[:, :self.dim_x], self.back_particles[:, self.dim_x:])
